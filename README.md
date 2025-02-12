@@ -1,12 +1,13 @@
 # Voice Command System
 
-Control your computer with a voice interface. Uses Whisper for speech recognition and supports clicking UI elements, typing text, and asking questions about highlighted text.
+Control your computer with a voice interface. Uses Whisper for speech recognition and supports clicking UI elements, typing text, reading text aloud, and asking questions about highlighted text.
 
 ## Features
 - Voice Activity Detection (VAD) for automatic command detection
 - Speech recognition using OpenAI's Whisper model
 - Click commands: Find and click text/buttons on screen using OCR
 - Type commands: Type text using keyboard emulation
+- Read commands: Read highlighted text aloud using text-to-speech
 - Computer commands: Ask questions about highlighted text using local LLM
 
 ## Requirements
@@ -44,8 +45,14 @@ python main.py
 
 3. Available commands:
 - "Click [text]" - Clicks text/buttons on screen
-- "Type [text]" - Types the specified text
+- "Type [text]" or "Type in [text]" - Types the specified text
+- "Read" - Reads currently highlighted text aloud
 - "Computer [query]" - Asks about highlighted text
+
+4. Keyboard Controls:
+- Press and hold **Ctrl+Alt** to record a voice command
+- Click the microphone icon to toggle continuous listening mode
+- Click the stop button to stop any active text-to-speech
 
 ## Project Structure
 ```
@@ -54,6 +61,13 @@ voice_command/
 │   └── vad.py
 ├── commands/
 │   └── command_processor.py
+├── core/
+│   ├── __init__.py
+│   └── voice_system.py
+├── gui/
+│   ├── __init__.py
+│   ├── application.py
+│   └── window.py
 ├── speech/
 │   └── whisper_processor.py
 ├── main.py

@@ -28,7 +28,6 @@ class VoiceCommandWindow(Gtk.ApplicationWindow):
         # Keyboard state
         self.ctrl_pressed = False
         self.alt_pressed = False
-        self.space_pressed = False
         
         # Build UI before setting up voice system
         self.setup_ui()
@@ -50,11 +49,9 @@ class VoiceCommandWindow(Gtk.ApplicationWindow):
                         self.ctrl_pressed = True
                     elif key == keyboard.Key.alt_l or key == keyboard.Key.alt_r:
                         self.alt_pressed = True
-                    elif key == keyboard.Key.space:
-                        self.space_pressed = True
                     
-                    # Check if hotkey combination is pressed
-                    if self.ctrl_pressed and self.alt_pressed and self.space_pressed:
+                    # Check if hotkey combination is pressed (Ctrl+Alt)
+                    if self.ctrl_pressed and self.alt_pressed:
                         if not self.is_listening and not self.recording_key_pressed:
                             logger.debug("Starting quick record...")
                             self.recording_key_pressed = True
@@ -71,14 +68,12 @@ class VoiceCommandWindow(Gtk.ApplicationWindow):
                         self.ctrl_pressed = False
                     elif key == keyboard.Key.alt_l or key == keyboard.Key.alt_r:
                         self.alt_pressed = False
-                    elif key == keyboard.Key.space:
-                        self.space_pressed = False
                     
                     # Stop recording if any required key is released
-                    if self.recording_key_pressed and not (self.ctrl_pressed and self.alt_pressed and self.space_pressed):
+                    if self.recording_key_pressed and not (self.ctrl_pressed and self.alt_pressed):
                         logger.debug("Stopping quick record...")
                         self.recording_key_pressed = False
-                        GLib.idle_add(self.status_label.set_text, "Press Ctrl+Alt+Space to record command")
+                        GLib.idle_add(self.status_label.set_text, "Press Ctrl+Alt to record command")
                         GLib.idle_add(self.voice_system.stop_quick_record)
                 except Exception as e:
                     logger.error(f"Error in key release handler: {e}", exc_info=True)
@@ -249,7 +244,7 @@ class VoiceCommandWindow(Gtk.ApplicationWindow):
             self.listen_button.set_icon_name("audio-input-microphone-symbolic")
             self.listen_button.set_tooltip_text("Start Listening")
             if self.key_activation_mode:
-                self.status_label.set_text("Press Ctrl+Alt+Space to record command")
+                self.status_label.set_text("Press Ctrl+Alt to record command")
             else:
                 self.status_label.set_text("Click microphone to start listening")
         

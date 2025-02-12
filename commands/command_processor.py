@@ -50,6 +50,11 @@ class CommandProcessor:
                 "computer",
                 "Ask questions about highlighted text",
                 self._handle_computer
+            ),
+            "read": Command(
+                "read",
+                "Read highlighted text aloud",
+                self._handle_read
             )
         }
         self.espeak_config = "-ven+f3 -k5 -s150"  # Speech configuration
@@ -58,6 +63,11 @@ class CommandProcessor:
     def parse_command(self, text: str) -> Tuple[Optional[str], Optional[str]]:
         """Parse the voice command into command type and arguments."""
         text = text.lower().strip()
+        
+        # Handle "type in" command
+        if text.startswith("type in "):
+            return "type", text[8:].strip()
+            
         for cmd in self.commands:
             if text.startswith(cmd):
                 args = text[len(cmd):].strip()
@@ -199,6 +209,33 @@ class CommandProcessor:
             error_msg = f"Computer command failed: {str(e)}"
             print(error_msg)
             yield error_msg
+
+    async def _handle_read(self, text: str) -> str:
+        """Handle read command by reading highlighted text aloud."""
+        try:
+            # Get highlighted text using xclip
+            highlighted = subprocess.check_output(
+                ['xclip', '-o', '-selection', 'primary'],
+                stderr=subprocess.PIPE
+            ).decode('utf-8').strip()
+            
+            if not highlighted:
+                message = "No text is highlighted"
+                self._speak(message)
+                return message
+            
+            # Speak the highlighted text
+            self._speak(highlighted)
+            return f"Reading highlighted text: {highlighted[:50]}..."
+            
+        except subprocess.CalledProcessError as e:
+            error_msg = f"Failed to get highlighted text: {str(e)}"
+            print(error_msg)
+            return error_msg
+        except Exception as e:
+            error_msg = f"Read command failed: {str(e)}"
+            print(error_msg)
+            return error_msg
 
     async def _stream_ollama(self, prompt: str) -> AsyncGenerator[str, None]:
         """Stream responses from Ollama."""

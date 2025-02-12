@@ -1,0 +1,13 @@
+torch
+transformers
+accelerate>=0.26.0
+sounddevice
+webrtcvad-wheels
+pyautogui
+pytesseract
+numpy
+pillow
+datasets
+safetensors
+librosa
+soundfile

@@ -1,9 +1,8 @@
 # Voice Command System
 
-A voice-controlled system that allows you to interact with your computer using natural speech commands. Uses Whisper for speech recognition and supports clicking UI elements, typing text, and asking questions about highlighted text.
+Control your computer with a voice interface. Uses Whisper for speech recognition and supports clicking UI elements, typing text, and asking questions about highlighted text.
 
 ## Features
-
 - Voice Activity Detection (VAD) for automatic command detection
 - Speech recognition using OpenAI's Whisper model
 - Click commands: Find and click text/buttons on screen using OCR
@@ -49,7 +48,6 @@ python main.py
 - "Computer [query]" - Asks about highlighted text
 
 ## Project Structure
-
 ```
 voice_command/
 ├── audio/
@@ -61,5 +59,6 @@ voice_command/
 ├── main.py
 └── requirements.txt
 ```
-# license
+
+## License
 GPL3 by David Hamner

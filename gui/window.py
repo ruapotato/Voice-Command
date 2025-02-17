@@ -39,54 +39,6 @@ class VoiceCommandWindow(Gtk.ApplicationWindow):
         
         logger.debug("Window initialized")
 
-    def setup_keyboard(self):
-        """Setup keyboard listener"""
-        try:
-            def on_press(key):
-                try:
-                    logger.debug(f"Key pressed: {key}")
-                    if key == keyboard.Key.ctrl_l or key == keyboard.Key.ctrl_r:
-                        self.ctrl_pressed = True
-                    elif key == keyboard.Key.alt_l or key == keyboard.Key.alt_r:
-                        self.alt_pressed = True
-                    
-                    # Check if hotkey combination is pressed (Ctrl+Alt)
-                    if self.ctrl_pressed and self.alt_pressed:
-                        if not self.is_listening and not self.recording_key_pressed:
-                            logger.debug("Starting quick record...")
-                            self.recording_key_pressed = True
-                            GLib.idle_add(self.status_label.set_text, "Recording command...")
-                            GLib.idle_add(self.voice_system.start_quick_record)
-                            GLib.idle_add(self.present)
-                except Exception as e:
-                    logger.error(f"Error in key press handler: {e}", exc_info=True)
-
-            def on_release(key):
-                try:
-                    logger.debug(f"Key released: {key}")
-                    if key == keyboard.Key.ctrl_l or key == keyboard.Key.ctrl_r:
-                        self.ctrl_pressed = False
-                    elif key == keyboard.Key.alt_l or key == keyboard.Key.alt_r:
-                        self.alt_pressed = False
-                    
-                    # Stop recording if any required key is released
-                    if self.recording_key_pressed and not (self.ctrl_pressed and self.alt_pressed):
-                        logger.debug("Stopping quick record...")
-                        self.recording_key_pressed = False
-                        GLib.idle_add(self.status_label.set_text, "Press Ctrl+Alt to record command")
-                        GLib.idle_add(self.voice_system.stop_quick_record)
-                except Exception as e:
-                    logger.error(f"Error in key release handler: {e}", exc_info=True)
-
-            # Start the keyboard listener in a non-blocking thread
-            self.keyboard_listener = keyboard.Listener(on_press=on_press, on_release=on_release)
-            self.keyboard_listener.start()
-            
-            logger.debug("Keyboard listener started")
-            
-        except Exception as e:
-            logger.error(f"Failed to setup keyboard: {e}", exc_info=True)
-
     def setup_ui(self):
         """Create the main UI layout"""
         # Main container
@@ -144,13 +96,8 @@ class VoiceCommandWindow(Gtk.ApplicationWindow):
         self.update_ui_state()
         logger.debug("UI setup complete")
 
-    def on_transcript(self, text, command_type="Voice"):
-        """Handle new transcripts from voice system"""
-        logger.info(f"New transcript: {text}")
-        GLib.idle_add(self.add_history_item, command_type, text)
-
     def add_history_item(self, command_type, text):
-        """Add item to command history"""
+        """Add item to command history with copy button"""
         timestamp = datetime.now().strftime("%H:%M:%S")
         
         # Create history entry
@@ -160,11 +107,14 @@ class VoiceCommandWindow(Gtk.ApplicationWindow):
         box.set_margin_top(6)
         box.set_margin_bottom(6)
         
-        # Command type and timestamp
+        # Header with command type, timestamp, and copy button
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        
+        # Left side with type and timestamp
+        header_left = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         type_label = Gtk.Label()
         type_label.set_markup(f"<b>{command_type}</b>")
-        header.append(type_label)
+        header_left.append(type_label)
         
         time_label = Gtk.Label(label=timestamp)
         css_provider = Gtk.CssProvider()
@@ -173,7 +123,18 @@ class VoiceCommandWindow(Gtk.ApplicationWindow):
             css_provider,
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
-        header.append(time_label)
+        header_left.append(time_label)
+        
+        # Make left side expand
+        header_left.set_hexpand(True)
+        header.append(header_left)
+        
+        # Copy button
+        copy_button = Gtk.Button()
+        copy_button.set_icon_name("edit-copy-symbolic")
+        copy_button.set_tooltip_text("Copy to clipboard")
+        copy_button.connect("clicked", self.on_copy_text, text)
+        header.append(copy_button)
         
         box.append(header)
         
@@ -181,6 +142,7 @@ class VoiceCommandWindow(Gtk.ApplicationWindow):
         text_label = Gtk.Label(label=text)
         text_label.set_xalign(0)
         text_label.set_wrap(True)
+        text_label.set_selectable(True)  # Make text selectable
         box.append(text_label)
         
         # Add to list
@@ -191,6 +153,79 @@ class VoiceCommandWindow(Gtk.ApplicationWindow):
         
         logger.debug(f"Added history item: {command_type} - {text}")
         return False  # Required for GLib.idle_add
+
+    def on_copy_text(self, button, text):
+        """Copy text to clipboard"""
+        clipboard = self.get_clipboard()
+        clipboard.set(text)
+        
+        # Show a brief notification
+        self.status_label.set_text("Copied to clipboard!")
+        GLib.timeout_add(1500, self.reset_status_label)
+
+    def reset_status_label(self):
+        """Reset the status label to its default text"""
+        if self.is_listening:
+            self.status_label.set_text("Listening for commands...")
+        else:
+            if self.key_activation_mode:
+                self.status_label.set_text("Press Ctrl+Alt to record command")
+            else:
+                self.status_label.set_text("Click microphone to start listening")
+        return False  # Required for GLib.timeout_add
+
+    def setup_keyboard(self):
+        """Setup keyboard listener"""
+        try:
+            def on_press(key):
+                try:
+                    logger.debug(f"Key pressed: {key}")
+                    if key == keyboard.Key.ctrl_l or key == keyboard.Key.ctrl_r:
+                        self.ctrl_pressed = True
+                    elif key == keyboard.Key.alt_l or key == keyboard.Key.alt_r:
+                        self.alt_pressed = True
+                    
+                    # Check if hotkey combination is pressed (Ctrl+Alt)
+                    if self.ctrl_pressed and self.alt_pressed:
+                        if not self.is_listening and not self.recording_key_pressed:
+                            logger.debug("Starting quick record...")
+                            self.recording_key_pressed = True
+                            GLib.idle_add(self.status_label.set_text, "Recording command...")
+                            GLib.idle_add(self.voice_system.start_quick_record)
+                            GLib.idle_add(self.present)
+                except Exception as e:
+                    logger.error(f"Error in key press handler: {e}", exc_info=True)
+
+            def on_release(key):
+                try:
+                    logger.debug(f"Key released: {key}")
+                    if key == keyboard.Key.ctrl_l or key == keyboard.Key.ctrl_r:
+                        self.ctrl_pressed = False
+                    elif key == keyboard.Key.alt_l or key == keyboard.Key.alt_r:
+                        self.alt_pressed = False
+                    
+                    # Stop recording if any required key is released
+                    if self.recording_key_pressed and not (self.ctrl_pressed and self.alt_pressed):
+                        logger.debug("Stopping quick record...")
+                        self.recording_key_pressed = False
+                        GLib.idle_add(self.status_label.set_text, "Press Ctrl+Alt to record command")
+                        GLib.idle_add(self.voice_system.stop_quick_record)
+                except Exception as e:
+                    logger.error(f"Error in key release handler: {e}", exc_info=True)
+
+            # Start the keyboard listener in a non-blocking thread
+            self.keyboard_listener = keyboard.Listener(on_press=on_press, on_release=on_release)
+            self.keyboard_listener.start()
+            
+            logger.debug("Keyboard listener started")
+            
+        except Exception as e:
+            logger.error(f"Failed to setup keyboard: {e}", exc_info=True)
+
+    def on_transcript(self, text, command_type="Voice"):
+        """Handle new transcripts from voice system"""
+        logger.info(f"New transcript: {text}")
+        GLib.idle_add(self.add_history_item, command_type, text)
 
     def on_listen_toggled(self, button):
         """Toggle continuous listening mode"""

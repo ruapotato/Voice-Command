@@ -14,6 +14,7 @@ from PIL import Image
 class Command:
     """A command with its state and execution function."""
     name: str
+    aliases: list[str]  # Add aliases for command variations
     description: str
     execute: Callable
     state: Dict[str, bool] = field(default_factory=lambda: {'is_running': False})
@@ -38,21 +39,25 @@ class CommandProcessor:
         self.commands = {
             "click": Command(
                 "click",
+                [],
                 "Click text or buttons on screen",
                 self._handle_click
             ),
             "type": Command(
                 "type",
+                ["type in"],  # Add "type in" as an alias
                 "Type text using keyboard",
                 self._handle_type
             ),
             "computer": Command(
                 "computer",
+                [],
                 "Ask questions about highlighted text",
                 self._handle_computer
             ),
             "read": Command(
                 "read",
+                ["reed", "red"],  # Add sound-alike variations
                 "Read highlighted text aloud",
                 self._handle_read
             )
@@ -62,16 +67,33 @@ class CommandProcessor:
 
     def parse_command(self, text: str) -> Tuple[Optional[str], Optional[str]]:
         """Parse the voice command into command type and arguments."""
-        text = text.lower().strip()
+        text = text.strip()
         
-        # Handle "type in" command
-        if text.startswith("type in "):
-            return "type", text[8:].strip()
+        # Handle capitalization variations
+        lower_text = text.lower()
+
+        # Handle "type in" variations and cleanup
+        if lower_text.startswith("type in"):
+            args = text[7:].strip().strip(',').strip()  # Remove extra commas and spaces
+            return "type", args
             
-        for cmd in self.commands:
-            if text.startswith(cmd):
+        if lower_text.startswith("type"):
+            args = text[4:].strip().strip(',').strip()  # Remove extra commas and spaces
+            return "type", args
+
+        # Check for sound-alike commands
+        for cmd, command_obj in self.commands.items():
+            # Check main command name
+            if lower_text.startswith(cmd):
                 args = text[len(cmd):].strip()
                 return cmd, args
+            
+            # Check aliases
+            for alias in command_obj.aliases:
+                if lower_text.startswith(alias):
+                    args = text[len(alias):].strip()
+                    return cmd, args
+
         return None, None
 
     async def _handle_click(self, text: str) -> str:
@@ -160,6 +182,10 @@ class CommandProcessor:
     async def _handle_type(self, text: str) -> str:
         """Handle type commands by using xdotool to type text."""
         try:
+            # Capitalize first letter if original command was capitalized
+            if text and not text[0].isupper():
+                text = text[0].upper() + text[1:]
+
             print(f"Typing text: '{text}'")
             subprocess.run(['xdotool', 'type', text], check=True)
             return f"Typed: '{text}'"

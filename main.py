@@ -14,7 +14,7 @@ from gui.application import VoiceCommandApp
 from core.voice_system import VoiceCommandSystem
 
 # Configure logging
-logging.basicConfig(level=logging.DEBUG,
+logging.basicConfig(level=logging.WARNING,
                    format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 

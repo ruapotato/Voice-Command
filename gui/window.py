@@ -179,7 +179,6 @@ class VoiceCommandWindow(Gtk.ApplicationWindow):
         try:
             def on_press(key):
                 try:
-                    logger.debug(f"Key pressed: {key}")
                     if key == keyboard.Key.ctrl_l or key == keyboard.Key.ctrl_r:
                         self.ctrl_pressed = True
                     elif key == keyboard.Key.alt_l or key == keyboard.Key.alt_r:
@@ -198,7 +197,6 @@ class VoiceCommandWindow(Gtk.ApplicationWindow):
 
             def on_release(key):
                 try:
-                    logger.debug(f"Key released: {key}")
                     if key == keyboard.Key.ctrl_l or key == keyboard.Key.ctrl_r:
                         self.ctrl_pressed = False
                     elif key == keyboard.Key.alt_l or key == keyboard.Key.alt_r:

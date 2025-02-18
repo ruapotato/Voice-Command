@@ -57,7 +57,7 @@ class CommandProcessor:
             ),
             "read": Command(
                 "read",
-                ["reed", "red"],  # Add sound-alike variations
+                ["reed", "red", "three"],  # Add sound-alike variations
                 "Read highlighted text aloud",
                 self._handle_read
             )

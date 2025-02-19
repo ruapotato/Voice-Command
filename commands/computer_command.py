@@ -246,11 +246,10 @@ User request: {query}"""
 
     def _determine_tool_type(self, query: str) -> str:
         """Determine which tool prompt to use based on the query"""
-        query = query.lower()
-        words = query.split()
+        query = query.lower().strip()
         
-        # First check for explicit shell command
-        if query.startswith('shell '):
+        # Check for "computer shell" command first
+        if query.startswith('computer shell') or query.startswith('shell'):
             return 'shell'
         
         # Then check other tool patterns

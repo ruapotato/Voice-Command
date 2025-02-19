@@ -1,13 +1,18 @@
 import gi
 gi.require_version('Gtk', '4.0')
+gi.require_version('Vte', '3.91')
 gi.require_version('Adw', '1')
-from gi.repository import Gtk, Adw, GLib, Gdk, Gio
+from gi.repository import Gtk, Vte, Gdk, GLib, Adw, Gio, Pango
 import asyncio
 import threading
 from datetime import datetime
 import subprocess
 import logging
 from pynput import keyboard
+import os
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -18,7 +23,7 @@ class VoiceCommandWindow(Gtk.ApplicationWindow):
         
         # Window setup
         self.set_title("Voice Command System")
-        self.set_default_size(500, 400)
+        self.set_default_size(1200, 600)
         
         # State
         self.is_listening = False
@@ -37,21 +42,32 @@ class VoiceCommandWindow(Gtk.ApplicationWindow):
         self.voice_system = voice_system
         self.voice_system.set_transcript_callback(self.on_transcript)
         
+        # Terminal setup
+        self.terminal_content = ""
+        self.command_history = []
+        self.voice_system = voice_system
+        self.voice_system.set_window(self)  # Add this line
+        self.voice_system.set_transcript_callback(self.on_transcript)
+        
         logger.debug("Window initialized")
 
     def setup_ui(self):
         """Create the main UI layout"""
-        # Main container
-        main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        main_box.set_margin_start(18)
-        main_box.set_margin_end(18)
-        main_box.set_margin_top(18)
-        main_box.set_margin_bottom(18)
-        self.set_child(main_box)
+        # Main container using Gtk.Paned for split view
+        self.paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
+        self.set_child(self.paned)
+        self.paned.set_position(600)
+        
+        # Left side: Voice command interface
+        left_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        left_box.set_margin_start(18)
+        left_box.set_margin_end(18)
+        left_box.set_margin_top(18)
+        left_box.set_margin_bottom(18)
         
         # Control buttons
         controls = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        main_box.append(controls)
+        left_box.append(controls)
         
         # Listen button
         self.listen_button = Gtk.Button()
@@ -68,7 +84,7 @@ class VoiceCommandWindow(Gtk.ApplicationWindow):
         
         # LLM query box
         query_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        main_box.append(query_box)
+        left_box.append(query_box)
         
         self.query_entry = Gtk.Entry()
         self.query_entry.set_placeholder_text("Ask about highlighted text...")
@@ -82,7 +98,7 @@ class VoiceCommandWindow(Gtk.ApplicationWindow):
         # Command history
         scroll = Gtk.ScrolledWindow()
         scroll.set_vexpand(True)
-        main_box.append(scroll)
+        left_box.append(scroll)
         
         self.history_list = Gtk.ListBox()
         self.history_list.set_selection_mode(Gtk.SelectionMode.NONE)
@@ -91,10 +107,98 @@ class VoiceCommandWindow(Gtk.ApplicationWindow):
         # Status bar
         self.status_label = Gtk.Label()
         self.status_label.set_xalign(0)
-        main_box.append(self.status_label)
+        left_box.append(self.status_label)
+        
+        # Add left side to paned
+        self.paned.set_start_child(left_box)
+        self.paned.set_resize_start_child(True)
+        
+        # Right side: Terminal interface
+        self.setup_terminal()
         
         self.update_ui_state()
         logger.debug("UI setup complete")
+
+    def setup_terminal(self):
+        """Setup the terminal interface"""
+        # Terminal container
+        terminal_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        
+        # Terminal header
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        header.set_margin_start(6)
+        header.set_margin_end(6)
+        header.set_margin_top(6)
+        header.set_margin_bottom(6)
+        
+        # Terminal label
+        terminal_label = Gtk.Label(label="Terminal")
+        terminal_label.set_xalign(0)
+        header.append(terminal_label)
+        
+        terminal_box.append(header)
+        
+        # Terminal widget
+        self.terminal = Vte.Terminal()
+        self.terminal.set_size_request(-1, 400)
+        self.terminal.set_font(Pango.FontDescription("Monospace 11"))
+        self.terminal.set_scrollback_lines(10000)
+        self.terminal.set_mouse_autohide(True)
+        self.terminal.connect('contents-changed', self.on_terminal_output)
+        
+        # Terminal scrolled window
+        terminal_scroll = Gtk.ScrolledWindow()
+        terminal_scroll.set_child(self.terminal)
+        terminal_scroll.set_vexpand(True)
+        terminal_box.append(terminal_scroll)
+        
+        # Add terminal side to paned
+        self.paned.set_end_child(terminal_box)
+        self.paned.set_resize_end_child(True)
+        
+        # Spawn terminal
+        self.spawn_terminal()
+
+    def spawn_terminal(self):
+        """Start the terminal process"""
+        self.terminal.spawn_async(
+            Vte.PtyFlags.DEFAULT,
+            os.environ['HOME'],
+            ['/bin/bash'],
+            [],
+            GLib.SpawnFlags.DO_NOT_REAP_CHILD,
+            None,
+            None,
+            -1,
+            None,
+            None,
+        )
+
+    def execute_shell_command(self, command: str):
+        """Execute a command in the terminal"""
+        try:
+            self.write_to_terminal(f"# Executing: {command}")
+            self.terminal.feed_child(f"{command}\n".encode())
+            return True
+        except Exception as e:
+            logger.error(f"Failed to execute command: {e}")
+            return False
+
+    def write_to_terminal(self, text: str):
+        """Write text to the terminal"""
+        self.terminal.feed_child(f"{text}\n".encode())
+
+    def on_terminal_output(self, terminal):
+        """Handle terminal output changes"""
+        content = self.terminal.get_text()[0].strip()
+        self.terminal_content = content
+        # Add to command history if it's a command
+        if content.startswith('$'):
+            cmd = content.split('$', 1)[1].strip()
+            if cmd and cmd not in self.command_history:
+                self.command_history.append(cmd)
+                if len(self.command_history) > 10:
+                    self.command_history.pop(0)
 
     def add_history_item(self, command_type, text):
         """Add item to command history with copy button"""

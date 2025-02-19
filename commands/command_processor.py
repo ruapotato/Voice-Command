@@ -6,14 +6,23 @@ from .read_command import ReadCommand
 from .computer_command import ComputerCommand
 
 class CommandProcessor:
-    def __init__(self):
-        """Initialize the command processor with all available commands."""
+    def __init__(self, window=None):
+        """Initialize the command processor with all available commands.
+        
+        Args:
+            window: Optional reference to the main window for terminal integration
+        """
+        self.window = window
+        computer_cmd = ComputerCommand()
+        if window:
+            computer_cmd.set_window(window)
+            
         self.commands = {
             cmd.name: cmd for cmd in [
                 ClickCommand(),
                 TypeCommand(),
                 ReadCommand(),
-                ComputerCommand()
+                computer_cmd
             ]
         }
         print("Command processor initialized with:", list(self.commands.keys()))
@@ -66,3 +75,15 @@ class CommandProcessor:
                 error_msg = f"Command execution failed: {str(e)}"
                 print(error_msg)
                 yield error_msg
+
+    def set_window(self, window):
+        """Update window reference for command processor and commands.
+        
+        Args:
+            window: Reference to the main window for terminal integration
+        """
+        self.window = window
+        # Update window reference for commands that need it
+        for cmd in self.commands.values():
+            if hasattr(cmd, 'set_window'):
+                cmd.set_window(window)

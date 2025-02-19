@@ -17,6 +17,7 @@ class VoiceCommandSystem:
         """Initialize the voice command system components."""
         logger.info("Initializing voice command system...")
         self.transcript_callback = None
+        self.window = None
         self.setup_system()
         logger.info("System initialization complete")
 
@@ -29,8 +30,8 @@ class VoiceCommandSystem:
             # Initialize VAD
             self.setup_vad()
             
-            # Initialize command processor
-            self.command_processor = CommandProcessor()
+            # Initialize command processor with window reference
+            self.command_processor = CommandProcessor(window=self.window)
             
             # Set up audio queue and recording state
             self.audio_queue = queue.Queue()
@@ -41,6 +42,11 @@ class VoiceCommandSystem:
         except Exception as e:
             logger.error(f"Error during system setup: {e}", exc_info=True)
             raise
+
+    def set_window(self, window):
+        """Set the window reference"""
+        self.window = window
+        self.command_processor.set_window(window)
 
     def setup_vad(self):
         """Initialize Voice Activity Detection."""

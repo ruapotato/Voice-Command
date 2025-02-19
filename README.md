@@ -57,21 +57,30 @@ python main.py
 ## Project Structure
 ```
 voice_command/
-├── audio/
+├── LICENSE
+├── README.md
+├── audio
 │   └── vad.py
-├── commands/
-│   └── command_processor.py
-├── core/
+├── commands
+│   ├── __init__.py
+│   ├── base.py
+│   ├── click_command.py
+│   ├── command_processor.py
+│   ├── computer_command.py
+│   ├── read_command.py
+│   └── type_command.py
+├── core
 │   ├── __init__.py
 │   └── voice_system.py
-├── gui/
+├── gui
 │   ├── __init__.py
 │   ├── application.py
 │   └── window.py
-├── speech/
-│   └── whisper_processor.py
 ├── main.py
-└── requirements.txt
+├── print_project.py
+├── requirements.txt
+└── speech
+    └── whisper_processor.py
 ```
 
 ## License

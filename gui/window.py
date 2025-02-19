@@ -86,6 +86,94 @@ class VoiceCommandWindow(Gtk.ApplicationWindow):
         query_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         left_box.append(query_box)
         
+         # Add help expander before the command history
+        help_expander = Gtk.Expander(label="Command Help")
+        help_expander.set_expanded(True)
+        help_expander.set_margin_top(12)
+        
+        # Help content in a scrolled window
+        help_scroll = Gtk.ScrolledWindow()
+        help_scroll.set_min_content_height(150)
+        help_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        help_box.set_margin_start(8)
+        help_box.set_margin_end(8)
+        help_box.set_margin_top(8)
+        help_box.set_margin_bottom(8)
+        
+        # Basic usage section
+        basic_label = Gtk.Label()
+        basic_label.set_markup("""<span size="large" weight="bold">Basic Usage:</span>
+    Press and hold <b>Ctrl + Alt</b> and say a command
+    Use the stop button to stop any reply""")
+        basic_label.set_xalign(0)
+        basic_label.set_wrap(True)
+        help_box.append(basic_label)
+        
+        # Direct commands section
+        direct_label = Gtk.Label()
+        direct_label.set_markup("""
+    <span size="large" weight="bold">Direct Commands:</span>
+    <i>These commands don't need LLM processing:</i>
+
+    <span foreground="#2563eb">type</span> <span foreground="#16a34a">"message to type"</span> - Types the specified text
+    <span foreground="#2563eb">read</span> - Reads highlighted text
+    <span foreground="#2563eb">click</span> <span foreground="#16a34a">"element"</span> - Clicks specified element on screen""")
+        direct_label.set_xalign(0)
+        direct_label.set_wrap(True)
+        direct_label.set_margin_top(12)
+        help_box.append(direct_label)
+        
+        # LLM commands section
+        llm_label = Gtk.Label()
+        llm_label.set_markup("""
+    <span size="large" weight="bold">LLM Commands:</span>
+    <i>All commands starting with "computer" use LLM processing:</i>
+
+    <span foreground="#2563eb">computer</span> <span foreground="#16a34a">"question about highlighted text"</span>
+    <span foreground="#2563eb">computer</span> <span foreground="#9333ea">shell</span> <span foreground="#16a34a">"request"</span> - Executes bash commands
+    <span foreground="#2563eb">computer</span> <span foreground="#9333ea">open</span> <span foreground="#16a34a">"app"</span> - Opens specified application
+    <span foreground="#2563eb">computer</span> <span foreground="#9333ea">goto</span> <span foreground="#16a34a">"app"</span> - Focuses specified window
+    <span foreground="#2563eb">computer</span> <span foreground="#9333ea">close</span> <span foreground="#16a34a">"app"</span> - Closes specified application""")
+        llm_label.set_xalign(0)
+        llm_label.set_wrap(True)
+        llm_label.set_margin_top(12)
+        help_box.append(llm_label)
+        
+        # Examples section
+        examples_label = Gtk.Label()
+        examples_label.set_markup("""
+    <span size="large" weight="bold">Example Uses:</span>
+
+    - Select a word and say: <span foreground="#2563eb">computer</span> <span foreground="#9333ea">define</span>
+    - Select a webpage and say: <span foreground="#2563eb">computer</span> <span foreground="#9333ea">tldr</span>
+    - Select a text box and say: <span foreground="#2563eb">type</span> <span foreground="#16a34a">"some really long thing I don't want to type"</span>
+    - Select some text and say: <span foreground="#2563eb">read</span>""")
+        examples_label.set_xalign(0)
+        examples_label.set_wrap(True)
+        examples_label.set_margin_top(12)
+        help_box.append(examples_label)
+        
+        # Color guide
+        color_label = Gtk.Label()
+        color_label.set_markup("""
+    <span size="small" weight="bold">Color Guide:</span>
+    <span foreground="#2563eb">Blue</span> - Base commands
+    <span foreground="#9333ea">Purple</span> - Command tools/modifiers
+    <span foreground="#16a34a">Green</span> - Command arguments""")
+        color_label.set_xalign(0)
+        color_label.set_wrap(True)
+        color_label.set_margin_top(12)
+        help_box.append(color_label)
+        
+        help_scroll.set_child(help_box)
+        help_expander.set_child(help_scroll)
+        left_box.append(help_expander)
+        
+        # Command history (keep existing code)
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_vexpand(True)
+        left_box.append(scroll)
+        
         self.query_entry = Gtk.Entry()
         self.query_entry.set_placeholder_text("Ask about highlighted text...")
         self.query_entry.connect("activate", self.on_query_submit)

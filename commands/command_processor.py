@@ -49,7 +49,7 @@ class CommandProcessor:
     async def process_command(self, text: str) -> AsyncGenerator[str, None]:
         """Process a voice command and yield status messages."""
         command_name, args = self.parse_command(text)
-        
+    
         if not command_name:
             yield "No valid command found"
             return

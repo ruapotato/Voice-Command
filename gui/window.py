@@ -10,6 +10,7 @@ import subprocess
 import logging
 from pynput import keyboard
 import os
+import requests
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -22,7 +23,7 @@ class VoiceCommandWindow(Gtk.ApplicationWindow):
         super().__init__(application=app)
         
         # Window setup
-        self.set_title("Voice Command System")
+        self.set_title("Voice Command")
         self.set_default_size(1200, 600)
         
         # State
@@ -45,9 +46,13 @@ class VoiceCommandWindow(Gtk.ApplicationWindow):
         # Terminal setup
         self.terminal_content = ""
         self.command_history = []
-        self.voice_system = voice_system
-        self.voice_system.set_window(self)  # Add this line
-        self.voice_system.set_transcript_callback(self.on_transcript)
+        self.voice_system.set_window(self)
+        
+        # Initialize model list
+        self.refresh_models()
+        
+        # Connect model selection signal
+        self.model_dropdown.connect("notify::selected", self.on_model_changed)
         
         logger.debug("Window initialized")
 
@@ -81,6 +86,33 @@ class VoiceCommandWindow(Gtk.ApplicationWindow):
         stop_button.set_tooltip_text("Stop Text-to-Speech")
         stop_button.connect("clicked", self.on_stop_readback)
         controls.append(stop_button)
+        
+        # Add model selection dropdown - NEW CODE
+        model_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        model_box.set_margin_top(6)
+        left_box.append(model_box)
+        
+        model_label = Gtk.Label(label="LLM Model:")
+        model_box.append(model_label)
+        
+        self.model_dropdown = Gtk.DropDown()
+        self.model_dropdown.set_margin_start(10)
+        self.model_dropdown.set_hexpand(True)
+        
+        # Populate models (we'll update this list when we detect installed models)
+        self.model_factory = Gtk.SignalListItemFactory()
+        self.model_factory.connect("setup", self._setup_model_item)
+        self.model_factory.connect("bind", self._bind_model_item)
+        
+        self.model_dropdown.set_factory(self.model_factory)
+        model_box.append(self.model_dropdown)
+        
+        # Refresh button for models
+        refresh_button = Gtk.Button()
+        refresh_button.set_icon_name("view-refresh-symbolic")
+        refresh_button.set_tooltip_text("Refresh Models")
+        refresh_button.connect("clicked", self.on_refresh_models)
+        model_box.append(refresh_button)
         
         # LLM query box
         query_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
@@ -206,6 +238,102 @@ class VoiceCommandWindow(Gtk.ApplicationWindow):
         
         self.update_ui_state()
         logger.debug("UI setup complete")
+
+    def _setup_model_item(self, factory, list_item):
+        """Set up model dropdown item"""
+        label = Gtk.Label()
+        label.set_halign(Gtk.Align.START)
+        list_item.set_child(label)
+
+    def _bind_model_item(self, factory, list_item):
+        """Bind model dropdown item"""
+        label = list_item.get_child()
+        item = list_item.get_item()
+        
+        if item:
+            model_name = item.get_string()
+            label.set_text(model_name)
+    
+    def on_model_changed(self, dropdown, param):
+        """Handle model selection change"""
+        self.update_selected_model()
+
+    def refresh_models(self):
+        """Refresh the list of available models"""
+        try:
+            # Query Ollama for available models
+            response = requests.get("http://localhost:11434/api/tags")
+            
+            if response.ok:
+                models = response.json().get("models", [])
+                model_names = [model.get("name") for model in models]
+                
+                # Create a string list
+                model_store = Gtk.StringList()
+                for model_name in sorted(model_names):
+                    model_store.append(model_name)
+                
+                # If we have models
+                if len(model_names) > 0:
+                    self.model_dropdown.set_model(model_store)
+                    
+                    # Select the first model or try to find "mistral"
+                    mistral_index = -1
+                    for i, name in enumerate(model_names):
+                        if name.lower() == "mistral":
+                            mistral_index = i
+                            break
+                    
+                    if mistral_index >= 0:
+                        self.model_dropdown.set_selected(mistral_index)
+                    else:
+                        self.model_dropdown.set_selected(0)
+                    
+                    # Update the computer command with the selected model
+                    self.update_selected_model()
+                
+                return len(model_names) > 0
+                
+            else:
+                logger.error(f"Failed to get models: {response.status_code}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error refreshing models: {e}")
+            
+            # Create a fallback model list with just "mistral"
+            model_store = Gtk.StringList()
+            model_store.append("mistral")
+            self.model_dropdown.set_model(model_store)
+            self.model_dropdown.set_selected(0)
+            return False
+
+    def on_refresh_models(self, button):
+        """Handle refresh models button click"""
+        success = self.refresh_models()
+        if success:
+            self.status_label.set_text("Models refreshed")
+        else:
+            self.status_label.set_text("Failed to refresh models. Is Ollama running?")
+        GLib.timeout_add(2000, self.reset_status_label)
+
+    def update_selected_model(self):
+        """Update the selected model in the ComputerCommand"""
+        selected = self.model_dropdown.get_selected()
+        model_store = self.model_dropdown.get_model()
+        
+        if selected >= 0 and model_store:
+            model_name = model_store.get_string(selected)
+            
+            # Update the model in the command processor
+            for cmd_name, command in self.voice_system.command_processor.commands.items():
+                if cmd_name == "computer" and hasattr(command, 'set_llm_model'):
+                    command.set_llm_model(model_name)
+                    self.status_label.set_text(f"Model set to {model_name}")
+                    GLib.timeout_add(2000, self.reset_status_label)
+                    break
+
+
 
     def setup_terminal(self):
         """Setup the terminal interface"""

@@ -8,6 +8,12 @@ import os
 from pathlib import Path
 from .base import Command
 
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
 class ToolRegistry:
     """Registry for available system tools and their capabilities"""
     
@@ -104,14 +110,14 @@ class ComputerCommand(Command):
         self.espeak_config = "-ven+f3 -k5 -s150"
         self.tools = ToolRegistry()
         self.window = None 
+        self.llm_model = "mistral"  # Default model
         
         # Original query prompt for general questions
-        self.query_prompt = """Context: {highlighted}
-Query: {query}
+        self.query_prompt = """Context of highlighted text: "{highlighted}"
+Now for the User Query: "{query}"
 
 Analyze the highlighted text and answer the query. Keep responses clear and concise.
-If the query isn't directly related to the highlighted text, mention that.
-If no text is highlighted, mention that we need highlighted text to answer the query."""
+If the query isn't directly related to the highlighted text, just answer the qestion."""
 
         # Shell command system prompt
         self.shell_prompt = """You are a desktop command assistant that outputs ONLY a single bash command.
@@ -207,6 +213,12 @@ Active windows:
 User request: {query}"""
         }
 
+    # Add a method to set the LLM model
+    def set_llm_model(self, model_name):
+        """Set the LLM model to use for queries."""
+        self.llm_model = model_name
+        logger.info(f"LLM model set to: {model_name}")
+
     async def _execute(self, text: str) -> AsyncGenerator[str, None]:
         """Process and execute computer commands"""
         try:
@@ -300,7 +312,7 @@ User request: {query}"""
             response = requests.post(
                 "http://localhost:11434/api/generate",
                 json={
-                    "model": "mistral",
+                    "model": self.llm_model,
                     "prompt": prompt,
                     "stream": False
                 }
@@ -344,7 +356,7 @@ User request: {query}"""
                 self._speak(message)
                 return
                 
-            print(f"Processing query: '{query}' with context: '{highlighted[:100]}...'")
+            print(f"Processing query: '{query}' with context: '{highlighted[:100]}...' using model: {self.llm_model}")
             
             prompt = self.query_prompt.format(
                 highlighted=highlighted,
@@ -354,7 +366,7 @@ User request: {query}"""
             response = requests.post(
                 "http://localhost:11434/api/generate",
                 json={
-                    "model": "mistral",
+                    "model": self.llm_model,
                     "prompt": prompt,
                     "stream": True
                 }
@@ -413,7 +425,7 @@ User request: {query}"""
             response = requests.post(
                 "http://localhost:11434/api/generate",
                 json={
-                    "model": "mistral",
+                    "model": self.llm_model,
                     "prompt": prompt,
                     "stream": False
                 }

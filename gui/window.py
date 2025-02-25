@@ -74,11 +74,11 @@ class VoiceCommandWindow(Gtk.ApplicationWindow):
         controls = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         left_box.append(controls)
         
-        # Listen button
-        self.listen_button = Gtk.Button()
-        self.listen_button.set_icon_name("audio-input-microphone-symbolic")
-        self.listen_button.connect("clicked", self.on_listen_toggled)
-        controls.append(self.listen_button)
+        # Listen button GOING AWAY
+        #self.listen_button = Gtk.Button()
+        #self.listen_button.set_icon_name("audio-input-microphone-symbolic")
+        #self.listen_button.connect("clicked", self.on_listen_toggled)
+        #controls.append(self.listen_button)
         
         # Stop readback button
         stop_button = Gtk.Button()
@@ -590,12 +590,12 @@ class VoiceCommandWindow(Gtk.ApplicationWindow):
     def update_ui_state(self):
         """Update UI elements based on current state"""
         if self.is_listening:
-            self.listen_button.set_icon_name("media-playback-stop-symbolic")
-            self.listen_button.set_tooltip_text("Stop Listening")
+            #self.listen_button.set_icon_name("media-playback-stop-symbolic")
+            #self.listen_button.set_tooltip_text("Stop Listening")
             self.status_label.set_text("Listening for commands...")
         else:
-            self.listen_button.set_icon_name("audio-input-microphone-symbolic")
-            self.listen_button.set_tooltip_text("Start Listening")
+            #self.listen_button.set_icon_name("audio-input-microphone-symbolic")
+            #self.listen_button.set_tooltip_text("Start Listening")
             if self.key_activation_mode:
                 self.status_label.set_text("Press Ctrl+Alt to record command")
             else:

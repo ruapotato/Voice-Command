@@ -3,12 +3,13 @@
 Control your computer with a voice interface. Uses Whisper for speech recognition and supports clicking UI elements, typing text, reading text aloud, and asking questions about highlighted text.
 
 ## Features
-- Voice Activity Detection (VAD) for automatic command detection
+
 - Speech recognition using OpenAI's Whisper model
 - Click commands: Find and click text/buttons on screen using OCR
 - Type commands: Type text using keyboard emulation
 - Read commands: Read highlighted text aloud using text-to-speech
 - Computer commands: Ask questions about highlighted text using local LLM
+- Rolling buffer to capture speech before hotkey activation
 
 ## Requirements
 
@@ -23,19 +24,19 @@ sudo apt-get install xdotool espeak xclip tesseract-ocr
 ```
 
 ### Local LLM Setup
-This project uses Ollama with the Mistral model for local LLM processing. To set up:
+This project uses Ollama with any compatible language model for local LLM processing. To set up:
 
 1. Install Ollama from [ollama.ai](https://ollama.ai)
-2. Pull the Mistral model:
+2. Pull your desired model:
 ```bash
-ollama pull mistral
+ollama pull mistral  # or any other model like llama3, phi, etc.
 ```
 
 ## Usage
 
-1. Start Ollama:
+1. Ensure Ollama is running in the background
 ```bash
-ollama run mistral
+# Ollama service should be running automatically after installation
 ```
 
 2. Run the voice command system:
@@ -59,8 +60,6 @@ python main.py
 voice_command/
 ├── LICENSE
 ├── README.md
-├── audio
-│   └── vad.py
 ├── commands
 │   ├── __init__.py
 │   ├── base.py

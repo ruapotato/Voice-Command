@@ -11,7 +11,7 @@ datasets
 safetensors
 librosa
 soundfile
-PyGObject>=3.42.0
+PyGObject==3.50.0
 pynput>=1.7.0
 pyaudio
 

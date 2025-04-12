@@ -15,3 +15,4 @@ soundfile==0.13.1
 torch==2.6.0
 transformers==4.48.3
 webrtcvad-wheels==2.0.14
+prompt_toolkit

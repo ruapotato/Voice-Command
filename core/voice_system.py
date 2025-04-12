@@ -215,14 +215,8 @@ class VoiceCommandSystem:
             logger.debug("Starting background listener for rolling buffer")
             try:
                 self.is_background_listening = True
-                # Optional: Wait for espeak to finish? Can cause delays.
-                # if is_espeak_running():
-                #     logger.warning("Waiting for espeak before starting background listener...")
-                #     # Add a sensible timeout
-                #     for _ in range(30): # Wait up to 3 seconds
-                #         if not is_espeak_running(): break
-                #         time.sleep(0.1)
-                #     else: logger.warning("Timeout waiting for espeak.")
+                # Optional: Wait for espeak?
+                # if is_espeak_running(): logger.warning("Waiting for espeak..."); time.sleep(0.5)
 
                 self.background_stream = self.p.open(
                     format=self.format,
@@ -236,7 +230,6 @@ class VoiceCommandSystem:
                 if self.background_stream.is_active():
                      logger.debug("Background listener stream started successfully.")
                 else:
-                     # If stream immediately fails, reset state
                      logger.error("Background listener stream failed to start (not active).")
                      self.is_background_listening = False
                      self.background_stream = None
@@ -249,49 +242,42 @@ class VoiceCommandSystem:
         """Stop background listening."""
         if self.background_stream is not None:
             logger.debug("Stopping background listener")
-            self.is_background_listening = False # Set flag first
+            self.is_background_listening = False
             stream_to_close = self.background_stream
-            self.background_stream = None # Prevent callback issues during close
+            self.background_stream = None
             try:
-                 if stream_to_close.is_active():
-                     stream_to_close.stop_stream()
+                 if stream_to_close.is_active(): stream_to_close.stop_stream()
                  stream_to_close.close()
                  logger.debug("Background listener stream stopped and closed.")
             except Exception as e:
                  logger.error(f"Error closing background stream: {e}")
-            # Ensure variable is cleared even if close fails
-            # self.background_stream = None # Already done above
 
     def background_callback(self, in_data, frame_count, time_info, status):
         """Handle audio input for background listening (rolling buffer)."""
         if not self.is_background_listening: return (None, pyaudio.paComplete)
-        if status: logger.warning(f"Background audio input status non-zero: {status}"); return (None, pyaudio.paContinue) # Log warning, but continue
-        if is_espeak_running(): return (in_data, pyaudio.paContinue) # Skip if speaking
+        if status: logger.warning(f"Background audio input status non-zero: {status}"); return (None, pyaudio.paContinue)
+        if is_espeak_running(): return (in_data, pyaudio.paContinue)
 
         try:
-            # Store numpy arrays if that's what downstream expects
             audio_chunk = np.frombuffer(in_data, dtype=np.int16)
             self.prev_frames.append(audio_chunk.copy())
-            # Efficiently trim list to max length
-            del self.prev_frames[:-self.prev_frames_maxlen]
+            del self.prev_frames[:-self.prev_frames_maxlen] # Trim list efficiently
         except Exception as e:
             logger.error(f"Error in background audio processing: {e}", exc_info=True)
 
         return (in_data, pyaudio.paContinue)
 
     # --- start/stop_quick_record are SYNCHRONOUS ---
-    # They will be called via run_in_executor from the hotkey listener
     def start_quick_record(self):
         """Start recording for quick command. (Synchronous)"""
         logger.info("Starting quick recording")
         if not self.p: logger.error("PyAudio not initialized."); return False
         if self.input_device_index is None: logger.error("No input device selected."); return False
-
-        if self.is_recording: logger.warning("Already recording."); return False # Prevent overlap
+        if self.is_recording: logger.warning("Already recording."); return False
 
         self.is_recording = True
-        self.stop_background_listener() # Stop background capture first
-        self.current_audio = self.prev_frames.copy() # Start with buffer
+        self.stop_background_listener()
+        self.current_audio = self.prev_frames.copy()
         logger.debug(f"Added {len(self.current_audio)} frames from rolling buffer")
 
         if self.stream is not None: # Close existing stream if somehow open
@@ -303,19 +289,13 @@ class VoiceCommandSystem:
         try:
             self.running = True # Enable callback processing
             if is_espeak_running(): logger.info("Espeak running during record start.")
-
-            # Open the stream for recording
             self.stream = self.p.open(
                 format=self.format, channels=self.channels, rate=self.sample_rate,
                 input=True, input_device_index=self.input_device_index,
                 frames_per_buffer=self.frame_length, stream_callback=self.quick_record_callback
             )
-            if self.stream.is_active():
-                 logger.debug("Quick record stream started successfully.")
-                 return True
-            else:
-                 logger.error("Quick record stream failed to start (not active).")
-                 self.is_recording = False; self.stream = None; return False
+            if self.stream.is_active(): logger.debug("Quick record stream started successfully."); return True
+            else: logger.error("Quick record stream failed to start (not active)."); self.is_recording = False; self.stream = None; return False
         except Exception as e:
             logger.error(f"Failed to start quick record stream: {e}", exc_info=True)
             self.stream = None; self.is_recording = False; return False
@@ -324,55 +304,34 @@ class VoiceCommandSystem:
     def stop_quick_record(self):
         """Stop recording and process the command. (Synchronous)"""
         if not self.is_recording:
-             logger.debug("Stop quick record called but not recording.")
-             # Ensure background listener restarts if needed
-             if self.background_stream is None and not self.is_background_listening:
-                  self.start_background_listener()
+             logger.debug("Stop quick called but not recording.")
+             if self.background_stream is None and not self.is_background_listening: self.start_background_listener()
              return
 
         logger.info("Stopping quick recording")
-        self.is_recording = False # Set flag immediately
+        self.is_recording = False
 
-        # Stop and close the stream
         if self.stream is not None:
-            stream_to_close = self.stream
-            self.stream = None # Clear stream variable
-            self.running = False # Signal callback to stop processing data
+            stream_to_close = self.stream; self.stream = None; self.running = False
             try:
-                # Make sure stream is active before stopping
-                if stream_to_close.is_active():
-                     stream_to_close.stop_stream()
+                if stream_to_close.is_active(): stream_to_close.stop_stream()
                 stream_to_close.close()
                 logger.debug("Quick record stream stopped and closed.")
-            except Exception as e:
-                 logger.error(f"Error stopping/closing quick record stream: {e}")
+            except Exception as e: logger.error(f"Error stopping/closing quick record stream: {e}")
 
-
-        # Process the collected audio
         if self.current_audio:
             logger.debug(f"Processing recorded audio of size: {len(self.current_audio)} chunks")
             try:
-                # Check if all elements are numpy arrays before concatenating
                 if all(isinstance(chunk, np.ndarray) for chunk in self.current_audio):
                     combined_audio = np.concatenate(self.current_audio)
-                    # Schedule the async processing in the main loop
                     self._schedule_process_speech(combined_audio)
-                else:
-                    logger.error("Audio buffer corrupted: contains non-numpy elements.")
-            except ValueError as e:
-                 logger.error(f"Error concatenating audio chunks: {e}. Chunks: {[type(c).__name__ for c in self.current_audio]}")
-            except Exception as e:
-                 logger.error(f"Unexpected error during audio combination: {e}")
-            finally:
-                 self.current_audio = [] # Clear buffer regardless
-        else:
-             logger.info("No audio recorded during quick record session.")
+                else: logger.error("Audio buffer corrupted: contains non-numpy elements.")
+            except ValueError as e: logger.error(f"Error concatenating audio chunks: {e}. Chunks: {[type(c).__name__ for c in self.current_audio]}")
+            except Exception as e: logger.error(f"Unexpected error during audio combination: {e}")
+            finally: self.current_audio = []
+        else: logger.info("No audio recorded during quick record session.")
 
-
-        # Restart background listener after stopping and processing
-        # Needs to be done carefully to avoid race conditions if stop is called rapidly
-        # Maybe schedule the restart slightly later?
-        # For now, direct start.
+        # Restart background listener
         self.start_background_listener()
 
 
@@ -398,7 +357,6 @@ class VoiceCommandSystem:
              return
         try:
             if inspect.iscoroutinefunction(self.process_speech):
-                 # Use call_soon_threadsafe to schedule task creation from executor thread
                  self.loop.call_soon_threadsafe(
                      lambda: asyncio.create_task(self.process_speech(audio_data))
                  )
@@ -416,24 +374,34 @@ class VoiceCommandSystem:
         try:
             text = await self.whisper.transcribe(audio_data)
             if text:
-                logger.info(f"Transcribed text: {text}")
-                self.transcript_callback(text, "Voice") # Print transcription
+                logger.info(f"Original Transcription: {text}")
+                # Print original transcription to CLI
+                self.transcript_callback(text, "Voice")
 
-                # Process command and handle results
-                async for result in self.command_processor.process_command(text):
+                # Normalize the text for command processing
+                normalized_text = text.lower().rstrip('.?!').strip()
+                if not normalized_text: # Handle cases where only punctuation was transcribed
+                    logger.info("Normalized text is empty, skipping command processing.")
+                    return
+
+                logger.info(f"Normalized Command: {normalized_text}")
+
+                # Process command using normalized text
+                async for result in self.command_processor.process_command(normalized_text):
                     logger.info(f"Command result: {result}")
-                    # Print each yielded result to CLI
+                    # Print result to CLI
                     self.transcript_callback(f"{result}", "System")
-                    # Speak the command result if it's not an error/suggestion
-                    if result and not result.startswith("[Error:") and not result.startswith("Suggested command:"):
-                        await self.speak_func(result) # Call async speak function
+                    # Speak the result (speak func handles filtering)
+                    await self.speak_func(result)
             else:
                  logger.info("Transcription returned no text.")
                  self.transcript_callback("...", "Voice") # Indicate silence
 
         except Exception as e:
              logger.error(f"Error during async speech processing: {e}", exc_info=True)
-             self.transcript_callback(f"[Error processing speech: {e}]", "Error")
+             # Use callback safely, assuming it handles potential None
+             if self.transcript_callback:
+                  self.transcript_callback(f"[Error processing speech: {e}]", "Error")
 
 
     def cleanup(self):
@@ -444,19 +412,19 @@ class VoiceCommandSystem:
         self.is_recording = False
 
         # Ensure streams are stopped and closed
-        if self.stream:
-            try:
-                if self.stream.is_active(): self.stream.stop_stream()
-                self.stream.close()
-            except Exception as e: logger.debug(f"Exception closing main stream: {e}") # Debug level
-            finally: self.stream = None
-
-        if self.background_stream:
-            try:
-                if self.background_stream.is_active(): self.background_stream.stop_stream()
-                self.background_stream.close()
-            except Exception as e: logger.debug(f"Exception closing background stream: {e}") # Debug level
-            finally: self.background_stream = None
+        for stream_ref in [self.stream, self.background_stream]:
+             stream = stream_ref # Work with local var in loop
+             if stream:
+                  try:
+                       # Check if stream object has methods before calling
+                       if hasattr(stream, 'is_active') and stream.is_active():
+                            if hasattr(stream, 'stop_stream'): stream.stop_stream()
+                       if hasattr(stream, 'close'): stream.close()
+                  except Exception as e:
+                       # Log errors during close at debug level
+                       logger.debug(f"Exception closing stream: {e}")
+        self.stream = None
+        self.background_stream = None
 
         # Terminate PyAudio
         if self.p:
@@ -464,7 +432,9 @@ class VoiceCommandSystem:
                 logger.debug("Terminating PyAudio...")
                 self.p.terminate()
                 logger.debug("PyAudio terminated.")
-            except Exception as e: logger.error(f"Error terminating PyAudio: {e}")
-            finally: self.p = None
+            except Exception as e:
+                 logger.error(f"Error terminating PyAudio: {e}")
+            finally:
+                 self.p = None # Ensure p is None after attempt
 
         logger.info("Voice command system resources released.")

@@ -3,7 +3,7 @@
 import asyncio
 import sys
 import logging
-from typing import List, Optional, Callable, Any # Add Callable, Any
+from typing import List, Optional, Callable, Any, Coroutine # Added Coroutine
 import textwrap
 
 # Third-party imports
@@ -18,7 +18,7 @@ from cli.output import schedule_print, print_consumer, print_queue, safe_print, 
 from cli.completer import CLICompleter, ollama_models_for_completion
 import hotkey_listener # Keep import
 from commands.command_processor import CommandProcessor
-from commands.computer_command import ComputerCommand
+from commands.computer_command import ComputerCommand # Keep direct import if needed
 from core.voice_system import VoiceCommandSystem
 
 # Configure logging
@@ -26,9 +26,9 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 # --- Global Variables ---
-ollama_models_list: List[str] = ["mistral"]
+ollama_models_list: List[str] = ["mistral"] # Default model
 computer_command_instance: Optional[ComputerCommand] = None
-# --- New global for tracking the current command task ---
+# --- Global for tracking the current command task ---
 current_command_task: Optional[asyncio.Task] = None
 
 # --- Accessor function for the hotkey listener ---
@@ -37,8 +37,7 @@ def get_current_task() -> Optional[asyncio.Task]:
     global current_command_task
     return current_command_task
 
-# --- Voice System Callback ---
-# --- Modified: Needs to handle task creation and cancellation ---
+# --- Voice Command Handler ---
 async def handle_voice_command(text: str, command_processor: CommandProcessor):
     """Processes voice commands, manages the task, handles cancellation."""
     global current_command_task
@@ -46,26 +45,28 @@ async def handle_voice_command(text: str, command_processor: CommandProcessor):
         logger.warning("New voice command received while previous task running. Cancelling previous.")
         current_command_task.cancel()
         try:
-            await current_command_task # Allow cancellation to propagate
+            # Give cancellation a chance to propagate
+            await asyncio.wait_for(current_command_task, timeout=0.5)
         except asyncio.CancelledError:
             logger.debug("Previous voice task cancelled successfully.")
+        except asyncio.TimeoutError:
+            logger.warning("Timeout waiting for previous voice task cancellation.")
         except Exception as e:
             logger.error(f"Error awaiting previous cancelled voice task: {e}")
         finally:
              current_command_task = None # Explicitly clear
 
     logger.info(f"Processing voice command: {text}")
-    # Create a task for the command processing
+    # Create a task for the command processing using the helper
     current_command_task = asyncio.create_task(
-        _execute_command_stream(text, command_processor, "Voice") # Use helper
+        _execute_command_stream(text, command_processor, "Voice")
     )
 
     try:
         await current_command_task
     except asyncio.CancelledError:
-        schedule_print("System", "Voice command processing cancelled.")
+        # Message is printed by the interrupt handler or the task itself
         logger.info("Voice command task was cancelled.")
-        # Ensure any subprocesses (like espeak) are handled by the cancellation signal in hotkey listener
     except Exception as e:
         logger.error(f"Error executing voice command task '{text}': {e}", exc_info=True)
         schedule_print("Error", f"Failed processing voice command: {e}")
@@ -74,26 +75,12 @@ async def handle_voice_command(text: str, command_processor: CommandProcessor):
         if current_command_task and current_command_task.done():
              current_command_task = None
 
-
+# --- Transcript Callback (for printing only) ---
 def handle_transcript(text: str, source: str = "Voice"):
-    """Callback from Voice System. Schedules print or command processing."""
-    # Schedule print for all transcripts initially
+    """Callback from Voice System. Schedules print updates."""
     schedule_print(source, text)
 
-    # If it's a final voice transcription (not just "...") , schedule command processing
-    # Assuming 'Voice' is the source for final transcriptions needing execution
-    # and system/error messages don't trigger commands here.
-    if source == "Voice" and text and text != "...":
-         # We need access to the command_processor and the loop to schedule the async handler
-         # This creates a dependency issue. Let's refactor VoiceCommandSystem slightly.
-
-         # Alternative: VoiceCommandSystem calls a method passed to it during init,
-         # which is defined in main.py and has access to command_processor.
-         # See modification in VoiceCommandSystem below.
-         pass # Command processing will be triggered differently now
-
 # --- Typed Command Processing ---
-# --- Modified: Needs to handle task creation and cancellation ---
 async def process_typed_command(text: str, command_processor: CommandProcessor):
     """Processes commands entered via the CLI, manages the task, handles cancellation."""
     global current_command_task
@@ -101,9 +88,12 @@ async def process_typed_command(text: str, command_processor: CommandProcessor):
         logger.warning("New typed command received while previous task running. Cancelling previous.")
         current_command_task.cancel()
         try:
-            await current_command_task # Allow cancellation to propagate
+             # Give cancellation a chance to propagate
+            await asyncio.wait_for(current_command_task, timeout=0.5)
         except asyncio.CancelledError:
             logger.debug("Previous typed task cancelled successfully.")
+        except asyncio.TimeoutError:
+             logger.warning("Timeout waiting for previous typed task cancellation.")
         except Exception as e:
             logger.error(f"Error awaiting previous cancelled typed task: {e}")
         finally:
@@ -111,17 +101,16 @@ async def process_typed_command(text: str, command_processor: CommandProcessor):
 
 
     schedule_print("Typed", text)
-    # Create a task for the command processing
+    # Create a task for the command processing using the helper
     current_command_task = asyncio.create_task(
-        _execute_command_stream(text, command_processor, "Typed") # Use helper
+        _execute_command_stream(text, command_processor, "Typed")
     )
 
     try:
         await current_command_task
     except asyncio.CancelledError:
-        schedule_print("System", "Typed command processing cancelled.")
+        # Message is printed by the interrupt handler or the task itself
         logger.info("Typed command task was cancelled.")
-        # Ensure any subprocesses (like espeak) are handled by the cancellation signal in hotkey listener
     except Exception as e:
         logger.error(f"Error executing typed command task '{text}': {e}", exc_info=True)
         schedule_print("Error", f"Failed processing command: {e}")
@@ -133,47 +122,60 @@ async def process_typed_command(text: str, command_processor: CommandProcessor):
 # --- Helper for executing commands and handling streams/speaking ---
 async def _execute_command_stream(text: str, command_processor: CommandProcessor, source: str):
     """Internal helper to run command processor and handle output/speech."""
+    original_cmd_name = None # Keep track of the originally matched command
     try:
         cmd_name, args = command_processor.parse_command(text)
+        original_cmd_name = cmd_name # Store the matched command name
         processor_input = text # Default to full text
-        is_general_query = False
+        is_general_query = False # Will only be true if original_cmd_name is 'computer'
 
         if cmd_name:
-            # For known commands, maybe don't prefix with 'computer'
-            # Let the command processor handle the parsed command directly
+            # --- Specific command matched ---
             schedule_print("System", f"Executing: {cmd_name} {args if args else ''}")
             processor_input = text # Use the original parsed command text
-        elif source == "Typed":
-            # For typed input that doesn't match a command, treat as general query for ComputerCommand
-            schedule_print("System", f"Processing general query: {text}...")
-            processor_input = f"computer {text}" # Prepend "computer"
-            is_general_query = True
-        elif source == "Voice":
-             # For voice input that doesn't match, prepend "computer"
-             schedule_print("System", f"Processing general voice query: {text}...")
-             processor_input = f"computer {text}" # Prepend "computer"
-             is_general_query = True
+            # Determine if it's the computer command for LLM message type
+            is_general_query = (cmd_name == "computer")
+        else:
+            # --- No specific command matched: Treat as Type command ---
+            logger.info(f"No command keyword matched for input: '{text}'. Treating as 'type' command.")
+            schedule_print("System", f"No command matched. Typing...") # Update printed message
 
+            # Re-construct the input as if it were a 'type' command
+            processor_input = f"type {text}"
+            original_cmd_name = "type" # Update for speaking logic
+            is_general_query = False # Ensure this is false
 
-        # Use the potentially modified processor_input
+        # --- Execute the command (either original or the reconstructed 'type' command) ---
         async for result in command_processor.process_command(processor_input):
-            # Determine message type (LLM if general query, System otherwise)
+            # Determine message type
             msg_type = "LLM" if is_general_query else "System"
-            schedule_print(msg_type, f"{result}")
+            schedule_print(msg_type, f"{result}") # Always print the result
 
-            # Speak result conditionally (avoid speaking errors, suggestions, etc.)
-            # Let ComputerCommand handle its own speaking for streaming LLM output.
-            # Only speak results from other commands explicitly.
-            if not is_general_query and result and not isinstance(result, (list, dict)) and \
-               not str(result).startswith("[Error:") and \
-               not str(result).startswith("Suggested command:") and \
-               not str(result).startswith("Attempting action:") and \
-               not str(result).startswith("Interrupted"):
-                await speak(result)
+            # --- Speaking Logic ---
+            should_speak = False # Default to not speaking
+            if result and not isinstance(result, (list, dict)):
+                result_str = str(result)
+                # Speak only if it's NOT from 'read', 'computer', 'type', 'stop', etc.
+                # And not an error or common status message.
+                if original_cmd_name not in ["read", "computer", "type", "stop"] and \
+                   not result_str.startswith("[Error:") and \
+                   not result_str.startswith("Suggested command:") and \
+                   not result_str.startswith("Attempting action:") and \
+                   not result_str.startswith("Interrupted") and \
+                   not result_str.startswith("Finished reading") and \
+                   not result_str.startswith("Typed:") and \
+                   not result_str.startswith("Read command executed.") and \
+                   not result_str.startswith("No command matched."):
+                     should_speak = True
+
+            if should_speak:
+                await speak(result_str) # Call global speak function
+            # --- End Speaking Logic ---
 
     except asyncio.CancelledError:
          # Log cancellation specifically for this execution context
-         logger.info(f"Command execution for '{text}' cancelled.")
+         logger.info(f"Command execution for '{text}' cancelled within stream helper.")
+         # Don't schedule print here, handled by caller or interrupt handler
          raise # Re-raise cancellation error to be caught by the caller
     except Exception as e:
         # Log and schedule print for errors during command execution itself
@@ -182,39 +184,63 @@ async def _execute_command_stream(text: str, command_processor: CommandProcessor
         # Don't re-raise normal exceptions, let the task finish with error logged.
 
 
-# --- Help Text Generation (no changes needed) ---
+# --- Help Text Generation ---
 def generate_help_text(command_processor: CommandProcessor) -> str:
-    # ... (keep existing implementation) ...
+    """Generates help text dynamically from registered commands."""
     lines = []; lines.append("Available commands:")
     details = command_processor.get_command_details(); max_len = 0
     if details:
-        for name, aliases, _ in details: alias_str = f" ({', '.join(aliases)})" if aliases else ""; max_len = max(max_len, len(name) + len(alias_str))
-    static_cmds = ["select model [name]", "refresh_models", "help", "exit / quit", "stop"]
-    max_len = max(max_len, max(len(s) for s in static_cmds)) if static_cmds else max_len
-    indent = "  "; padding = 2; desc_width = 70
-    for name, aliases, description in details:
-        alias_str = f" ({', '.join(aliases)})" if aliases else ""; command_part = f"{indent}{name}{alias_str}".ljust(max_len + len(indent) + padding)
+        # Calculate max length for alignment
+        for name, aliases, _ in details:
+             alias_str = f" ({', '.join(aliases)})" if aliases else ""
+             max_len = max(max_len, len(name) + len(alias_str))
+    static_cmds = ["select model [name]", "refresh_models", "help", "exit / quit"] # Removed 'stop'
+    if static_cmds: # Avoid error if list is empty
+         max_len = max(max_len, max(len(s) for s in static_cmds))
+
+    indent = "  "; padding = 2; desc_width = 70 # Adjust desc_width if needed
+
+    # Add registered commands details
+    for name, aliases, description in sorted(details, key=lambda x: x[0]): # Sort commands alphabetically
+        alias_str = f" ({', '.join(aliases)})" if aliases else ""
+        command_part = f"{indent}{name}{alias_str}".ljust(max_len + len(indent) + padding)
+        # Wrap description
         wrapped_desc = textwrap.wrap(description or "No description.", width=desc_width)
-        lines.append(f"  <ansiblue>{command_part}</ansiblue> {wrapped_desc[0]}")
-        for line in wrapped_desc[1:]: lines.append(f"{indent}{' ' * (max_len + padding)} {line}")
-    lines.append("\nOther:")
+        # Add first line of description (or only line)
+        lines.append(f"  <ansiblue>{command_part}</ansiblue> {wrapped_desc[0] if wrapped_desc else ''}")
+        # Add subsequent lines of description indented
+        for line in wrapped_desc[1:]:
+            lines.append(f"{indent}{' ' * (max_len + len(indent) + padding)} {line}")
+
+    lines.append("\nOther CLI Commands:")
     lines.append(f"{indent}{'select model [name]'.ljust(max_len + padding)} - Switch the Ollama LLM model.")
     lines.append(f"{indent}{'refresh_models'.ljust(max_len + padding)} - Reload list of available Ollama models.")
-    lines.append(f"{indent}{'stop'.ljust(max_len + padding)} - Stops active text-to-speech feedback.")
+    # lines.append(f"{indent}{'stop'.ljust(max_len + padding)} - Stops active text-to-speech feedback (use Ctrl+C).") # Optional: Keep or remove stop command
     lines.append(f"{indent}{'help'.ljust(max_len + padding)} - Shows this help message.")
     lines.append(f"{indent}{'exit / quit'.ljust(max_len + padding)} - Exits the application.")
+
     lines.append("\nUsage:")
-    lines.append(f"{indent}General queries (e.g., 'tell me a joke') can be typed directly.")
-    lines.append(f"{indent}Voice activation: Press and hold Ctrl+Alt to record a voice command.")
-    lines.append(f"{indent}Interruption: Press Ctrl+C to stop the current command/speech.")
+    # --- Updated Usage Section ---
+    lines.append(f"{indent}- Start input with a known command keyword (e.g., 'click OK', 'read', 'screengrab')")
+    lines.append(f"{indent}  to execute that specific command.")
+    lines.append(f"{indent}- To query the LLM, you MUST start with the 'computer' keyword")
+    # Getting location dynamically might be complex, using placeholder
+    lines.append(f"{indent}  (e.g., 'computer what is the capital of Oregon?').")
+    lines.append(f"{indent}- Any input (voice or typed) that DOES NOT start with a known command keyword")
+    lines.append(f"{indent}  will be automatically TYPED out, similar to the 'type' command.")
+    lines.append(f"{indent}  Example: Saying 'hello world' will result in 'hello world' being typed.")
+    lines.append(f"\n{indent}Hotkeys:")
+    lines.append(f"{indent}- Voice Activation: Press and hold Ctrl+Alt to record voice input.")
+    lines.append(f"{indent}- Interruption: Press Ctrl+C to stop the current command or speech output.")
+    # --- End Updated Usage Section ---
     return "\n".join(lines)
 
-
-# --- Dynamic Prompt Function (no changes needed) ---
+# --- Dynamic Prompt Function ---
 def get_dynamic_prompt() -> str:
-    # ... (keep existing implementation) ...
+    """Returns the prompt string including the current model."""
     model = computer_command_instance.llm_model if computer_command_instance else "???"
-    return f"{model}> "
+    # Changed prompt slightly to indicate default action
+    return f"Cmd/Type ({model})> "
 
 # --- Main Application Logic ---
 async def async_main():
@@ -223,40 +249,54 @@ async def async_main():
 
     main_event_loop = asyncio.get_running_loop()
     print_task = asyncio.create_task(print_consumer())
-    # --- Allow print consumer to start ---
+    # Allow print consumer to start up
     await asyncio.sleep(0.05)
 
     schedule_print("System", "Initializing Voice Command CLI...")
 
-    command_processor = CommandProcessor()
-    # --- Ensure ComputerCommand instance is fetched ---
-    computer_command_instance = command_processor.commands.get("computer")
+    # Initialize Command Processor
+    try:
+        command_processor = CommandProcessor()
+        computer_command_instance = command_processor.commands.get("computer")
+    except Exception as e:
+        logger.critical(f"Failed to initialize CommandProcessor: {e}", exc_info=True)
+        schedule_print("Error", f"CRITICAL: Failed to load commands: {e}")
+        # Attempt cleanup and exit
+        await print_queue.put((None, None))
+        try: await asyncio.wait_for(print_task, timeout=1.0)
+        except Exception: pass
+        sys.exit(1)
+
+
+    # --- Initialize Ollama Models ---
     if not isinstance(computer_command_instance, ComputerCommand):
-        schedule_print("Error", "Critical: ComputerCommand module not found. LLM features disabled.")
-        # Decide if you want to exit or continue without LLM
-        # sys.exit(1) # Or just let it run without LLM
+        schedule_print("Warning", "ComputerCommand module not loaded correctly. LLM features disabled.")
     else:
-        # Initialize Ollama Models (check moved inside the 'else')
         schedule_print("System", "Fetching Ollama models...")
         try:
             fetched_models = await computer_command_instance.get_available_models()
-            if fetched_models:
+            if fetched_models: # Successfully fetched list (might be empty)
                 ollama_models_list = fetched_models
                 ollama_models_for_completion[:] = ollama_models_list
-                # Set default model only if list isn't empty
-                if ollama_models_list:
-                     computer_command_instance.set_llm_model(ollama_models_list[0])
-                     schedule_print("System", f"Ollama models loaded. Using: {computer_command_instance.llm_model}")
-                else:
-                     schedule_print("Warning", "No Ollama models found. LLM commands may fail.")
-                     # Keep default 'mistral' or handle appropriately
-                     computer_command_instance.set_llm_model("mistral") # Fallback
-            else:
-                schedule_print("Warning", f"Could not fetch Ollama models. Using default: {ollama_models_list[0]}")
+                if ollama_models_list: # List is not empty
+                    # Check if current model (default 'mistral') is valid, else use first available
+                    current_model = computer_command_instance.llm_model # Get current default
+                    if current_model not in ollama_models_list:
+                        new_model = ollama_models_list[0]
+                        computer_command_instance.set_llm_model(new_model)
+                        schedule_print("System", f"Default model '{current_model}' not found. Switched to: {new_model}")
+                    else:
+                        schedule_print("System", f"Ollama models loaded. Using: {current_model}")
+
+                else: # List is empty
+                    schedule_print("Warning", "No Ollama models found. LLM commands may fail.")
+                    computer_command_instance.set_llm_model("mistral") # Keep fallback
+            else: # API call failed (returned None)
+                schedule_print("Warning", f"Could not fetch Ollama models (API error?). Using default: {ollama_models_list[0]}")
                 ollama_models_for_completion[:] = ollama_models_list # Update completer with default
-                computer_command_instance.set_llm_model(ollama_models_list[0]) # Use default
+                computer_command_instance.set_llm_model(ollama_models_list[0]) # Ensure default is set
         except Exception as e:
-            schedule_print("Error", f"Failed to fetch Ollama models: {e}. Using default.")
+            schedule_print("Error", f"Failed during Ollama model fetch: {e}. Using default.")
             ollama_models_for_completion[:] = ollama_models_list # Update completer with default
             if computer_command_instance: computer_command_instance.set_llm_model(ollama_models_list[0])
 
@@ -267,8 +307,8 @@ async def async_main():
 
     # --- Define the callback function that VoiceCommandSystem will call ---
     async def trigger_command_processing(transcribed_text: str):
-        # This function now runs in the main async context and has access
-        # to command_processor.
+        """Callback from Voice System to handle final transcription."""
+        # This function runs in the main async context
         await handle_voice_command(transcribed_text, command_processor)
 
     try:
@@ -276,9 +316,9 @@ async def async_main():
         voice_system = VoiceCommandSystem(
              loop=main_event_loop,
              speak_func=speak,
-             command_trigger_func=trigger_command_processing # Pass the new async callback
+             command_trigger_func=trigger_command_processing # Pass the async callback
         )
-        # The transcript callback is now only for printing
+        # Set the callback for printing transcripts/status
         voice_system.set_transcript_callback(handle_transcript)
         schedule_print("System", "Voice system initialized.")
 
@@ -294,15 +334,18 @@ async def async_main():
 
     except Exception as e:
         logger.error(f"Failed to initialize VoiceCommandSystem or Hotkey Listener: {e}", exc_info=True)
-        schedule_print("Error", "Failed to initialize voice system or hotkey. Voice commands disabled.")
+        schedule_print("Error", "Failed to initialize voice system or hotkey. Voice commands/hotkeys disabled.")
         if voice_system: # Attempt cleanup if voice system partially initialized
              try:
-                 if asyncio.iscoroutinefunction(voice_system.cleanup): await voice_system.cleanup()
-                 else: voice_system.cleanup()
+                 # Check if cleanup is async or sync
+                 if asyncio.iscoroutinefunction(voice_system.cleanup):
+                     await voice_system.cleanup()
+                 else:
+                     # Run synchronous cleanup in executor if needed, or directly if safe
+                     await main_event_loop.run_in_executor(None, voice_system.cleanup)
              except Exception as cleanup_e: logger.error(f"Error during voice system cleanup after init failure: {cleanup_e}")
         voice_system = None # Ensure voice_system is None if init fails
-        # Do not proceed to CLI loop if basic systems failed? Or allow text-only mode?
-        # For now, let it proceed to text-only CLI
+
 
     # --- Setup Prompt Session ---
     cli_completer = CLICompleter(command_processor)
@@ -310,8 +353,8 @@ async def async_main():
         get_dynamic_prompt, # Dynamic prompt function
         completer=cli_completer,
         complete_while_typing=True,
-        # history=FileHistory('cli_history.txt'), # Optional history
-        # auto_suggest=AutoSuggestFromHistory(), # Optional suggestions
+        # history=FileHistory('cli_history.txt'), # Optional: Uncomment for history
+        # auto_suggest=AutoSuggestFromHistory(), # Optional: Uncomment for suggestions
     )
 
     schedule_print("System", f"CLI Ready. Type 'help' for commands or use hotkeys.")
@@ -322,7 +365,7 @@ async def async_main():
         try:
             # Use patch_stdout to ensure prompt redraws correctly after async prints
             with patch_stdout():
-                input_text = await session.prompt_async() # Removed default=""
+                input_text = await session.prompt_async() # Use await
 
             input_text = input_text.strip()
             if not input_text: continue # Ignore empty input
@@ -334,8 +377,7 @@ async def async_main():
 
             elif input_text.lower() == "help":
                 help_content = generate_help_text(command_processor)
-                # Use safe_print directly for potentially long help text
-                # Need to ensure safe_print handles ANSI codes correctly if used in help_content
+                # Use safe_print directly for potentially long help text with formatting
                 await safe_print(help_content)
                 continue
 
@@ -349,7 +391,6 @@ async def async_main():
                             ollama_models_for_completion[:] = ollama_models_list
                             if not ollama_models_list: # List could be empty
                                  schedule_print("Warning", "No Ollama models found after refresh.")
-                                 # Decide how to handle current model if it's gone
                                  if computer_command_instance.llm_model not in ollama_models_list:
                                      computer_command_instance.set_llm_model("mistral") # Fallback
                                      schedule_print("System", "Model reset to fallback 'mistral'.")
@@ -375,27 +416,28 @@ async def async_main():
                              computer_command_instance.set_llm_model(model_name)
                              schedule_print("System", f"LLM model set to: {model_name}")
                         else: schedule_print("Error", "Computer command module unavailable.")
-                    # Handle case where model list is empty or model not found
                     elif not ollama_models_list:
                          schedule_print("Error", "No models available to select.")
                     else:
-                         schedule_print("Error", f"Model '{model_name}' not found. Available: {ollama_models_list}")
+                         # Provide available models in error message
+                         available_models_str = ', '.join(ollama_models_list)
+                         schedule_print("Error", f"Model '{model_name}' not found. Available: {available_models_str}")
                 else: schedule_print("Error", "Usage: select model <model_name>")
                 continue
 
-            # --- Process Regular Commands / General Queries ---
+            # --- Process Regular Commands / Default Typing ---
             await process_typed_command(input_text, command_processor)
 
         except KeyboardInterrupt:
-            # Handle Ctrl+C at the prompt - cancel current task if any, or just redraw prompt
+            # Handle Ctrl+C pressed *at the prompt*
             if current_command_task and not current_command_task.done():
                  logger.debug("Ctrl+C at prompt: Cancelling active task.")
                  current_command_task.cancel()
-                 # No need to await here, let the main loop continue
-                 # The _interrupt_current_action in hotkey_listener will handle the message
+                 # Interrupt handler will print the message
             else:
-                 # Schedule print message for Ctrl+C when idle
-                 schedule_print("System", "(Ctrl+C at prompt)")
+                 # Schedule print message for Ctrl+C when idle if needed
+                 # schedule_print("System", "(Ctrl+C at prompt)") # Can be noisy
+                 pass # Just redraw prompt by continuing
             # Continue to redraw prompt
             continue
         except EOFError:
@@ -408,7 +450,7 @@ async def async_main():
             # Prevent rapid error loops if prompt_async fails repeatedly
             await asyncio.sleep(0.1)
 
-    # --- Cleanup ---
+    # --- Application Cleanup ---
     schedule_print("System", "Shutting down...")
 
     # --- Cancel any lingering task ---
@@ -416,8 +458,9 @@ async def async_main():
          logger.info("Shutting down: Cancelling active command task.")
          current_command_task.cancel()
          try:
-             await current_command_task
+             await asyncio.wait_for(current_command_task, timeout=1.0) # Wait briefly
          except asyncio.CancelledError: pass # Expected
+         except asyncio.TimeoutError: logger.warning("Timeout waiting for final task cancellation.")
          except Exception as e: logger.error(f"Error awaiting final task cancellation: {e}")
 
 
@@ -451,17 +494,28 @@ async def async_main():
     except Exception as e:
         logger.error(f"Error stopping print consumer: {e}")
 
-    # Wait for listener thread? Not strictly necessary as it's daemon, but cleaner.
-    # if listener_thread and listener_thread.is_alive():
-    #     logger.debug("Waiting for hotkey listener thread to exit...")
-    #     # Pynput listener doesn't have a clean stop method exposed easily across platforms
-    #     # Relying on daemon=True is usually sufficient. Joining might hang.
-    #     # listener_thread.join(timeout=1.0) # Attempt join with timeout
+    # Listener thread is daemon, will exit when main thread exits.
 
-# --- Main execution block (no changes needed) ---
+# --- Main execution block ---
 if __name__ == "__main__":
     try:
-        asyncio.run(async_main())
+        # Ensure terminal is reset properly on exit, especially if errors occur
+        import os
+        original_stty = None
+        if sys.stdin.isatty(): # Check if running in a real terminal
+             try:
+                 original_stty = os.popen('stty -g').read()
+             except Exception: # Silently ignore if stty fails
+                  original_stty = None
+
+        try:
+             asyncio.run(async_main())
+        finally:
+             # Restore terminal settings if they were saved
+             if original_stty:
+                 try: os.system(f'stty {original_stty.strip()}')
+                 except Exception: pass # Ignore errors during restore
+
     except KeyboardInterrupt:
         # This catches Ctrl+C if it happens *before* the asyncio loop starts or *after* it exits
         logger.info("Application interrupted by user (Ctrl+C outside main loop).")

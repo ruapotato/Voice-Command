@@ -8,7 +8,7 @@ import re # Keep for potential future use? Or remove.
 logger = logging.getLogger(__name__)
 
 print_queue = asyncio.Queue()
-ESPEAK_CONFIG = ["-ven+f3", "-k5", "-s150"] # Voice config
+ESPEAK_CONFIG = [] # Voice config
 
 # --- Speak Utility (using subprocess) ---
 

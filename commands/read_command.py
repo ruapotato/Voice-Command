@@ -17,7 +17,7 @@ class ReadCommand(Command):
             execute=self._execute
         )
         # <<< CHANGE: Store config as a list >>>
-        self.espeak_config = ["-ven+f3", "-k5", "-s150"]
+        self.espeak_config = []
         # Check if espeak exists on init
         try:
              subprocess.run(['which', 'espeak'], check=True, capture_output=True)

@@ -3,8 +3,9 @@
 import asyncio
 import sys
 import logging
-from typing import List, Optional, Callable, Any, Coroutine # Added Coroutine
+from typing import List, Optional, Callable, Any, Coroutine
 import textwrap
+import re # <<< For input normalization
 
 # Third-party imports
 from prompt_toolkit import PromptSession
@@ -124,28 +125,42 @@ async def _execute_command_stream(text: str, command_processor: CommandProcessor
     """Internal helper to run command processor and handle output/speech."""
     original_cmd_name = None # Keep track of the originally matched command
     try:
-        cmd_name, args = command_processor.parse_command(text)
+        # <<< Normalize the input text FIRST >>>
+        # Lowercase, strip leading/trailing whitespace
+        normalized_text = text.lower().strip()
+        # Remove common trailing punctuation (periods, question marks, exclamation points)
+        # using regex for cleaner removal than multiple .rstrip() calls.
+        normalized_text = re.sub(r'[.!?]+$', '', normalized_text).strip()
+        # Example: "Read." -> "read", "Computer what is this?" -> "computer what is this"
+        # Keep the original 'text' variable intact in case we need it for typing.
+        logger.debug(f"Original text: '{text}', Normalized for parsing: '{normalized_text}'")
+        # <<< END Normalization >>>
+
+        # Parse the NORMALIZED text to find the command
+        cmd_name, args = command_processor.parse_command(normalized_text)
         original_cmd_name = cmd_name # Store the matched command name
-        processor_input = text # Default to full text
-        is_general_query = False # Will only be true if original_cmd_name is 'computer'
+
+        processor_input = normalized_text # Start with normalized for command execution by default
+        is_general_query = False
 
         if cmd_name:
             # --- Specific command matched ---
             schedule_print("System", f"Executing: {cmd_name} {args if args else ''}")
-            processor_input = text # Use the original parsed command text
-            # Determine if it's the computer command for LLM message type
+            # processor_input is already normalized_text, which includes args if found by parser
             is_general_query = (cmd_name == "computer")
         else:
             # --- No specific command matched: Treat as Type command ---
-            logger.info(f"No command keyword matched for input: '{text}'. Treating as 'type' command.")
+            logger.info(f"No command keyword matched for normalized input: '{normalized_text}'. Treating as 'type' command.")
             schedule_print("System", f"No command matched. Typing...") # Update printed message
 
-            # Re-construct the input as if it were a 'type' command
+            # IMPORTANT: Use the ORIGINAL, un-normalized 'text' for typing
+            # so that punctuation and capitalization are preserved.
             processor_input = f"type {text}"
             original_cmd_name = "type" # Update for speaking logic
-            is_general_query = False # Ensure this is false
+            is_general_query = False
 
         # --- Execute the command (either original or the reconstructed 'type' command) ---
+        # Pass the appropriate input (normalized for commands, reconstructed 'type' for fallback)
         async for result in command_processor.process_command(processor_input):
             # Determine message type
             msg_type = "LLM" if is_general_query else "System"
@@ -224,8 +239,7 @@ def generate_help_text(command_processor: CommandProcessor) -> str:
     lines.append(f"{indent}- Start input with a known command keyword (e.g., 'click OK', 'read', 'screengrab')")
     lines.append(f"{indent}  to execute that specific command.")
     lines.append(f"{indent}- To query the LLM, you MUST start with the 'computer' keyword")
-    # Getting location dynamically might be complex, using placeholder
-    lines.append(f"{indent}  (e.g., 'computer what is the capital of Oregon?').")
+    lines.append(f"{indent}  (e.g., 'computer what is the weather in Sutherlin, Oregon?').") # Added location
     lines.append(f"{indent}- Any input (voice or typed) that DOES NOT start with a known command keyword")
     lines.append(f"{indent}  will be automatically TYPED out, similar to the 'type' command.")
     lines.append(f"{indent}  Example: Saying 'hello world' will result in 'hello world' being typed.")
@@ -504,17 +518,34 @@ if __name__ == "__main__":
         original_stty = None
         if sys.stdin.isatty(): # Check if running in a real terminal
              try:
-                 original_stty = os.popen('stty -g').read()
-             except Exception: # Silently ignore if stty fails
+                 # Use os.read rather than os.popen for potentially better compatibility/security
+                 # We need a way to run 'stty -g' and read its output. subprocess is better.
+                 stty_process = subprocess.run(['stty', '-g'], capture_output=True, text=True, check=False)
+                 if stty_process.returncode == 0:
+                      original_stty = stty_process.stdout.strip()
+                 else:
+                      logger.debug(f"stty -g failed: {stty_process.stderr}")
+             except FileNotFoundError:
+                  logger.debug("'stty' command not found, cannot save terminal settings.")
+             except Exception as e: # Catch other potential errors
+                  logger.warning(f"Could not get terminal settings via stty: {e}")
                   original_stty = None
 
         try:
              asyncio.run(async_main())
         finally:
              # Restore terminal settings if they were saved
-             if original_stty:
-                 try: os.system(f'stty {original_stty.strip()}')
-                 except Exception: pass # Ignore errors during restore
+             if original_stty and sys.stdin.isatty(): # Check again if it's a tty
+                 logger.debug(f"Restoring stty settings: {original_stty}")
+                 try:
+                     # Use subprocess again for consistency
+                     restore_process = subprocess.run(['stty', original_stty], check=False)
+                     if restore_process.returncode != 0:
+                          logger.warning(f"Failed to restore stty settings: {restore_process.stderr}")
+                 except FileNotFoundError:
+                      logger.warning("Cannot restore terminal settings: 'stty' not found.")
+                 except Exception as e:
+                      logger.error(f"Error restoring stty settings: {e}")
 
     except KeyboardInterrupt:
         # This catches Ctrl+C if it happens *before* the asyncio loop starts or *after* it exits

@@ -2,7 +2,6 @@ accelerate==1.3.0
 datasets==3.2.0
 librosa==0.10.2.post1
 numpy==2.1.3
-openai-whisper==20240930
 pillow==11.1.0
 PyAudio==0.2.14
 PyAutoGUI==0.9.54
@@ -16,3 +15,4 @@ torch==2.6.0
 transformers==4.48.3
 webrtcvad-wheels==2.0.14
 prompt_toolkit
+nemo_toolkit[asr]

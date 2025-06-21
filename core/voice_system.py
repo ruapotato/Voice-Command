@@ -295,7 +295,8 @@ class VoiceCommandSystem:
             return (None, pyaudio.paComplete) # Signal to stop if flag is false
         
         if status_flags: 
-            logger.warning(f"Background audio input status flags non-zero: {status_flags} ({pyaudio.PaCallbackFlags(status_flags).name if isinstance(status_flags, int) else status_flags})")
+            logger.warning(f"Background audio input status flags non-zero: {status_flags}")
+
             # Decide how to handle errors, e.g., input overflow. paContinue might still be okay.
             if status_flags == pyaudio.paInputOverflow:
                 logger.warning("Input overflow in background callback.")
@@ -441,7 +442,7 @@ class VoiceCommandSystem:
             return (None, pyaudio.paComplete) # Stop stream if not supposed to be running/recording
         
         if status_flags: 
-            logger.warning(f"Quick record audio input status flags non-zero: {status_flags} ({pyaudio.PaCallbackFlags(status_flags).name if isinstance(status_flags, int) else status_flags})")
+            logger.warning(f"Quick record audio input status flags non-zero: {status_flags}")
             if status_flags == pyaudio.paInputOverflow:
                 logger.warning("Input overflow in quick record callback.")
             return (None, pyaudio.paContinue) # Decide if to continue or abort on flags

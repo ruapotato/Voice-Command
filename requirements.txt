@@ -7,7 +7,7 @@ pytorch-lightning==2.5.1.post0
 cuda-python>=12.3
 
 # Audio Processing
-PyAudio==0.2.11
+PyAudio==0.2.12
 webrtcvad-wheels==2.0.14
 soundfile==0.13.1
 pydub==0.25.1

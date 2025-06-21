@@ -5,6 +5,7 @@ import sys
 import logging
 from typing import List, Optional, Callable, Any, Coroutine
 import textwrap
+import subprocess
 import re # <<< For input normalization
 
 # Third-party imports

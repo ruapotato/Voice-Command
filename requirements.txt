@@ -27,7 +27,7 @@ prompt_toolkit==3.0.51
 # espeak and xclip are system packages, not pip packages
 
 # Core dependencies
-numpy==2.1.3
+numpy<2.0
 sentencepiece==0.2.0
 protobuf==3.20.3
 accelerate==1.3.0

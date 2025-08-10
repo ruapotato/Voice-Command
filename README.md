@@ -9,7 +9,7 @@ Control your computer with a command-line voice interface. Uses NVIDIA's Parakee
 * Type commands: Type text using keyboard emulation.
 * Read commands: Read highlighted text aloud using text-to-speech.
 * Computer commands: Interact with your system (run shell commands, manage apps/windows, query about highlighted text) using a local LLM (Ollama).
-* Screengrab command: Select a screen area, perform OCR, and copy the extracted text.
+* scrap command: Select a screen area, perform OCR, and copy the extracted text.
 * Stop command: Immediately halts any active text-to-speech playback.
 * Rolling buffer: Captures audio just before hotkey activation to avoid missed words.
 * Hotkey controls: Use keyboard shortcuts to trigger recording and interrupt actions.

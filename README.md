@@ -85,7 +85,7 @@ python main.py
 
 ## Keyboard Controls
 
-* **Record Voice**: Press and hold `Ctrl+`
+* **Record Voice**: Press and hold `Ctrl+Shift`
 * **Interrupt/Stop**: Press `Ctrl+C`
 * **Exit**: Type `exit` or `quit` at the prompt, or press `Ctrl+D`
 

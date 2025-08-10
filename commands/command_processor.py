@@ -4,8 +4,8 @@ import inspect
 import logging
 import pkgutil
 from pathlib import Path
-from typing import AsyncGenerator, Optional, Tuple, Dict, List, Set
-import inspect # Keep for process_command check
+from typing import AsyncGenerator, Optional, Tuple, Dict, List
+from difflib import SequenceMatcher
 
 from .base import Command
 
@@ -15,6 +15,7 @@ class CommandProcessor:
     def __init__(self):
         """Initialize the command processor by dynamically discovering commands."""
         self.commands: Dict[str, Command] = {}
+        self.all_triggers_cache: List[str] = []
         self._discover_commands()
         logger.info(f"Command processor dynamically loaded commands: {list(self.commands.keys())}")
 
@@ -28,51 +29,87 @@ class CommandProcessor:
             logger.debug(f"Attempting to import module: {full_module_name}")
             try:
                 module = importlib.import_module(full_module_name)
-                logger.debug(f"Successfully imported module: {full_module_name}")
                 for _, obj in inspect.getmembers(module, inspect.isclass):
                     if obj.__module__ == full_module_name and issubclass(obj, Command) and obj is not Command:
                         try:
                             command_instance = obj()
                             if command_instance.name in self.commands: logger.warning(f"Duplicate command name '{command_instance.name}'. Overwriting.")
                             self.commands[command_instance.name] = command_instance
-                            logger.debug(f"Registered command: '{command_instance.name}' from {full_module_name}")
                         except Exception as inst_e: logger.error(f"Failed to instantiate command {obj.__name__} from {full_module_name}: {inst_e}", exc_info=True)
-            except ModuleNotFoundError: logger.error(f"Could not import module {full_module_name}. Skipping.", exc_info=True)
             except Exception as import_e: logger.error(f"Failed to import/process module {full_module_name}: {import_e}", exc_info=True)
+        self._cache_all_triggers()
 
-    # get_all_command_names_aliases (remains same)
-    def get_all_command_names_aliases(self) -> List[str]:
-        all_triggers = set(self.commands.keys()); [all_triggers.update(cmd.aliases) for cmd in self.commands.values()]
-        return sorted(list(all_triggers))
+    def _cache_all_triggers(self):
+        """Builds and caches a sorted list of all command triggers."""
+        triggers = set(self.commands.keys())
+        for cmd in self.commands.values():
+            triggers.update(cmd.aliases)
+        self.all_triggers_cache = sorted(list(triggers), key=len, reverse=True)
 
-    # get_command_details (remains same)
     def get_command_details(self) -> List[Tuple[str, List[str], str]]:
-         details = [ (cmd.name, cmd.aliases, getattr(cmd, 'description', 'No description.')) for cmd in sorted(self.commands.values(), key=lambda c: c.name) ]
-         return details
+        """Returns details for all registered commands for the help text."""
+        details = [(cmd.name, cmd.aliases, getattr(cmd, 'description', 'No description.')) for cmd in sorted(self.commands.values(), key=lambda c: c.name)]
+        return details
 
-    # parse_command (remains same)
+    def _get_command_name_for_trigger(self, trigger: str) -> Optional[str]:
+        """Helper to find the main command name from a trigger (which could be an alias)."""
+        if trigger in self.commands:
+            return trigger
+        for name, command_obj in self.commands.items():
+            if trigger in command_obj.aliases:
+                return name
+        return None
+
     def parse_command(self, text: str) -> Tuple[Optional[str], Optional[str]]:
-        text = text.strip(); lower_text = text.lower()
-        matched_command_name = None
-        for cmd_name, command in self.commands.items():
-             if lower_text == cmd_name: matched_command_name = cmd_name; break
-             if lower_text in command.aliases: matched_command_name = cmd_name; break
-        if matched_command_name: return matched_command_name, ""
-        candidates = [];
-        for cmd_name, command in self.commands.items(): candidates.append(cmd_name); candidates.extend(command.aliases)
-        candidates.sort(key=len, reverse=True)
-        for trigger in candidates:
-             trigger_prefix = trigger + " "
-             if lower_text.startswith(trigger_prefix):
-                  cmd_name = None
-                  if trigger in self.commands: cmd_name = trigger
-                  else:
-                       for name, command_obj in self.commands.items():
-                            if trigger in command_obj.aliases: cmd_name = name; break
-                  if cmd_name: args = text[len(trigger):].strip(); return cmd_name, args
+        """
+        Parses the command from the input text with robust prefix matching
+        and fuzzy matching for single-word commands.
+        """
+        text_orig = text.strip()
+        text_lower = text_orig.lower()
+
+        # First, try robust prefix matching for all triggers.
+        # This is better for commands that can take arguments.
+        for trigger in self.all_triggers_cache:
+            if text_lower.startswith(trigger):
+                # If it's an exact match
+                if len(text_lower) == len(trigger):
+                    command_name = self._get_command_name_for_trigger(trigger)
+                    return command_name, ""
+                
+                # If it's a prefix match (command with arguments)
+                char_after_trigger = text_lower[len(trigger)]
+                if char_after_trigger in ' ,.!?':
+                    command_name = self._get_command_name_for_trigger(trigger)
+                    if command_name:
+                        args = text_orig[len(trigger):].lstrip(' ,.!?')
+                        return command_name, args
+
+        # If no prefix match, try fuzzy matching for single-word commands.
+        # This helps with misspellings from voice-to-text.
+        words = text_lower.split()
+        if len(words) == 1:
+            text_norm = words[0].rstrip('.,!?')
+            # Find the best match among all triggers
+            best_match_trigger = None
+            highest_similarity = 0.85 # Minimum similarity threshold
+            
+            for trigger in self.all_triggers_cache:
+                # Only fuzzy match against triggers that don't expect arguments usually
+                # This is a heuristic: match against single-word triggers
+                if " " not in trigger:
+                    similarity = SequenceMatcher(None, text_norm, trigger).ratio()
+                    if similarity > highest_similarity:
+                        highest_similarity = similarity
+                        best_match_trigger = trigger
+            
+            if best_match_trigger:
+                command_name = self._get_command_name_for_trigger(best_match_trigger)
+                logger.debug(f"Fuzzy matched '{text_norm}' to '{best_match_trigger}' with similarity {highest_similarity:.2f}")
+                return command_name, ""
+
         return None, None
 
-    # --- CORRECTED process_command method ---
     async def process_command(self, text: str) -> AsyncGenerator[str, None]:
         """Process a command string and yield status messages."""
         command_name, args = self.parse_command(text)
@@ -88,21 +125,18 @@ class CommandProcessor:
 
         try:
             execute_method = command.execute
-            # --- Check type and execute/yield correctly ---
             if inspect.isasyncgenfunction(execute_method):
-                # <<< FIX: Moved async for to next line >>>
                 async for result_part in execute_method(args):
                     yield result_part
             elif inspect.iscoroutinefunction(execute_method):
-                # <<< FIX: Moved await and yield to separate lines >>>
                 result_message = await execute_method(args)
-                yield result_message
+                if result_message:
+                    yield result_message
             else:
-                # Handle synchronous commands
                 logger.warning(f"Command '{command_name}' execute method is synchronous.")
-                # Consider loop.run_in_executor if blocking, but yield directly for now
                 result_message = execute_method(args)
-                yield result_message
+                if result_message:
+                    yield result_message
         except Exception as e:
             error_msg = f"Command '{command_name}' execution failed: {str(e)}"
             logger.error(error_msg, exc_info=True)
